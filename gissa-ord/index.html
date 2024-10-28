@@ -1,1 +1,277 @@
-initial commit
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive Grid Layout with State</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body, html {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      font-family: Arial, sans-serif;
+      background-color: #181818;
+      color: #aaa;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      align-items: center;
+      width: min(100vw, 53vh);
+      height: 100vh;
+      background-color: #222;
+      padding: min(1vw, 1vh);
+    }
+
+    .challenge-grid, .letter-grid, .keyboard-grid {
+      display: grid;
+      gap: 0px;
+      width: 100%;
+    }
+
+    .challenge-grid {
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(1, 1fr);
+      margin-top: min(1vw, 1vh);
+    }
+
+    .letter-grid {
+      grid-template-columns: repeat(5, 1fr);
+      grid-template-rows: repeat(6, 1fr);
+      margin-top: min(1vw, 1vh);
+    }
+
+    .keyboard-grid {
+      grid-template-columns: repeat(8, 1fr);
+      grid-template-rows: repeat(4, 1fr);
+      margin-top: min(1vw, 1vh);
+    }
+
+    .grid-cell {
+      aspect-ratio: 1 / 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-color: #333;
+      border: 1px solid #000;
+      font-size: calc(min(100vw, 58vh) / 16.0);
+      color: #aaa;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .challenge-grid > .grid-cell {
+      aspect-ratio: 3 / 1;
+      font-size: calc(min(100vw, 58vh) / 20.0);
+    }
+    
+    .letter-grid > .grid-cell {
+      font-size: calc(min(100vw, 58vh) / 10.0);
+    }
+    
+    .grid-cell:active {
+      background-color: #444;
+    }
+  </style>
+</head>
+<body>
+  
+  <div class="container">
+    <div class="challenge-grid" id="challengeGrid"></div>
+    <div class="letter-grid" id="letterGrid"></div>
+    <div class="keyboard-grid" id="keyboardGrid"></div>
+  </div>
+
+  <script>
+    const challengeGrid = document.getElementById("challengeGrid");
+    const letterGrid = document.getElementById("letterGrid");
+    const keyboardGrid = document.getElementById("keyboardGrid");
+
+    function getWordOfTheDay(wordIndex) {
+      const WORDS = ["RÖJAS", "YRKAR", "SLOGS", "SÄNDA", "PAUSA", "BINDS", "HÄVER", "FINNA", "HÖGGS", "BANDS", "SKÅLA", "LÄSER", "STÖDS", "LEDAS", "RÄKNA", "SAGTS", "VARRA", "HÄMTA", "HALAS", "MÄTER", "TORKA", "SIMMA", "FRÅGA", "LJUGA", "FIRAS", "GRÖPT", "BJUDA", "NÄMNA", "MÄRKS", "STALS", "SKÄMT", "SÄGER", "SKÖTT", "HÄCKA", "FIXAR", "ÄGNAT", "UTKIK", "BIDRA", "LÖSTE", "VAJAR", "DASKA", "GRIPA", "FESTA", "LURAS", "VÄXTE", "TJUTA", "HÄNGA", "LYFTA", "SÄTTS", "BETAR", "ÄLSKA", "DRACK", "HÄNDA", "DOLDE", "MISSA", "SITTA", "LÄTTA", "LÅTER", "RÅNAT", "SKÖTS", "ORKAR", "GILLA", "HINNA", "VÄDJA", "RINNA", "SKREV", "PREJA", "LAGAT", "RESTE", "SATTS", "TRODE", "REGNA", "LUKTA", "ANTAS", "VÄRNA", "RIVIT", "ELDAT", "VÄLTA", "ANDAS", "LÄCKA", "HOTAR", "STJÄL", "VÄNDA", "VRÅLA", "UPPGÅ", "SLUTA", "KLÄTT", "SLÄPP", "VAKNA", "RIVAS", "NEKAT", "INSÅG", "TÄNDS", "LAGRA", "ÅTALA", "LÅTIT", "MEJLA", "LÖSES", "LITAT", "HÄVDA", "TIPSA", "PÅSTÅ", "LEKTE", "FÖLJA", "JAGAR", "DUGER", "BRÅKA", "LASTA", "TACKA", "RÄDDA", "FÄLLS", "RASAT", "RÅDIT", "VÄRJA", "TURAS", "HÄMMA", "RETAT", "DALTA", "GREPS", "PLÅGA", "SYNAS", "VETAT", "SKÄMS", "BYTTE", "SÖRJA", "STEKT", "HETTE", "TROTT", "TYNAR", "HITTA", "FÖLJT", "SLÄPA", "DELAT", "KYLER", "FÖRSE", "VISAR", "UTFÖR", "FALLA", "MÄRKA", "CYKLA", "LIGGA", "FYLLS", "SLITA", "LITAR", "BOLLA", "LÖPER", "FLYTA", "SOMNA", "STYRT", "TÄNTS", "RENAR", "RYMDE", "UPPNÅ", "ÖVADE", "MATCH", "PILLA", "BEGÅR", "LÅSAS", "INTOG", "GÖRAS", "FLYGA", "KÄNTS", "INGÅR", "PRÖVA", "LARMA", "STÖDA", "UTGAV", "HÄNGT", "LOTSA", "SKALL", "LÅNAT", "RÖRDE", "GLÖMS", "STÄNG", "TESTA", "BRYTS", "FÖRTS", "KLÄMS", "RÖSTA", "TAGIT", "GAGNA", "DÅNAR", "VRAKA", "FÅNGA", "AVLED", "SMYGA", "GJORT", "ANTAR", "KÄNDE", "FLÖDA", "RIVER", "KLAGA", "TITTA", "SKILT", "BORRA", "UTSTÅ", "DOPAT", "SJÖNK", "KLIVA", "TAGGA", "GAPAR", "HÖLLS", "LOCKA", "GREJA", "NATTA", "RÅDER", "QUIZA", "VÄRMS", "ÄGNAR", "RENAS", "TAPPA", "STÖRS", "SJÖNG", "BEGÄR", "HÖRTS", "SKRIV", "LÄRDE", "HINNS", "LÅSER", "TYDER", "LYFTS", "GRÄVT", "ÖPPNA", "SPÅRA", "LÄGGA", "PUMPA", "HÅNAR", "PROVA", "FRIAT", "SÖKTE", "RENSA", "FRYSA", "FLÖGS", "AVSLÅ", "SPELA", "BRYTA", "BYGGA", "BADAT", "FLYTT", "VIKER", "ELDAS", "RÖVAT", "AVGÖR", "GIVIT", "VÅRDA", "HÅLLS", "BOKAT", "MÄRKT", "VÄNDE", "TALAS", "TÄNKT", "TÄCKA", "KÖPER", "FISKA", "AVVEK", "MÅNAR", "SÄTTA", "TÖMDE", "MÖRDA", "KRÄVT", "BLÅSA", "RÖJDE", "LURAR", "HATAR", "BRÖTS", "KRÄVS", "SÄNKT", "SÄKRA", "PÅGÅR", "KOKAR", "HÅLLT", "BÄDDA", "ORDNA", "TÄNDA", "SAMLA", "KÄNNS", "OROAS", "MENAR", "OROAT", "SÄLJS", "BADAR", "TRASA", "LÅNAS", "HÖLJS", "RIKTA", "SÅLTS", "RIDIT", "AGERA", "RÄCKT", "TRIVS", "RESES", "GRIPS", "VÄXLA", "YRKAT", "DELTA", "DRÖMT", "SKÖTA", "LIDIT", "RYMMA", "NÖRDA", "FÖTTS", "LYSTE", "FÖDER", "BLÅST", "BLÖDA", "BJUDS", "GRÅTA", "SYNES", "VANNS", "SEGRA", "FÖRAS", "TÄCKS", "SKÄRA", "HYRAS", "KÖPTE", "SATTE", "SÄLJA", "NJUTA", "HANNS", "DRÖJT", "ANGER", "HÄVAS", "KRIGA", "HEJDA", "VIFTA", "HÄLLT", "LÄMNA", "BLÖTA", "BOTAS", "LÄSTE", "TALAR", "FIRAT", "HETER", "GLIDA", "BINDA", "PRATA", "RULLA", "LIKNA", "LAGAR", "UTSER", "LYDER", "RINGT", "HÄRMA", "TIPPA", "MÅLAR", "VÄNJA", "VÄCKS", "ANGES", "FOTAT", "VRÄKS", "UTGÅR", "VILAT", "SKREK", "PACKA", "VÄCKA", "TÄNKA", "VINKA", "KOSTA", "SÄNKS", "REPAR", "VELAT", "TRÄNA", "RÅKAR", "VARIT", "VÅGAR", "SLÅSS", "RASTA", "SETTS", "INSER", "BORDE", "FLYGS", "SLAPP", "GRÄVS", "TALAT", "SPOLA", "FÄLLT", "HÄNGS", "ÖKADE", "FLÄTA", "OROAR", "KELAR", "FÖLJS", "KRÄKS", "SUSAR", "VAKTA", "JOGGA", "AVSES", "DÖLJA", "DÖMER", "TYCKS", "DRIVS", "LÄCKT", "NÄMNS", "BÄRAS", "KVALA", "KUNDE", "ROPAT", "MINNS", "SVÄRS", "DROGS", "FÖRDE", "BUGGA", "ODLAR", "DÖPAS", "UTSES", "DROGA", "FYLLA", "KALAR", "ANSER", "TANKA", "KÖRDE", "SKETT", "SKAPA", "LEGAT", "GÄLLA", "SÄNKA", "TYCKT", "KNYTA", "DELAR", "PINKA", "SKADA", "NÖJER", "BÄVAR", "INTAR", "VALTS", "BERÖR", "DAMMA", "VÅGAT", "VERKA", "SPARA", "GISSA", "RINGA", "ÄGDES", "KOLLA", "LYSER", "UTÖKA", "LJUDA", "FASAS", "KORSA", "HYLLA", "KÖRTS", "SURFA", "NEKAS", "JAGAS", "SMITA", "ANSES", "FÖDDE", "PORTA", "HÄRJA", "HURRA", "BYGGT", "FANNS", "HUGGA", "UPPGE", "SKRED", "KLÄMT", "PYSTE", "OMKOM", "BOTAR", "UMGÅS", "KÄMPA", "RYCKA", "MENAS", "HÅLLA", "PARAR", "VÄRMA", "PRAOA", "AKTAR", "LEDDE", "FILMA", "HYRDE", "FATTA", "STIGA", "MÖTER", "GÄLLT", "STÅTT", "HÄNDE", "AVGÅR", "LADES", "STRÖK", "TJÄNA", "DANSA", "SKIVA", "MÅSTA", "VÄGDE", "BRYTT", "KUNNA", "PEKAS", "DELAS", "ÄTITS", "VÄGRA", "LETAR", "BACKA", "KALLA", "GLÄDS", "DIKAT", "CAMPA", "SADES", "DRIVA", "MÅSTE", "LAPAR", "LEKER", "MÖTTS", "LEVER", "LUGNA", "BRUKA", "STÖTT", "AVGER", "RUSAR", "BITER", "NYPER", "SOLAR", "SOVIT", "BOXAR", "LÄSAS", "LIDER", "FÄLLA", "LADDA", "BYTER", "BJÖDS", "HOTAS", "SLÖSA", "TÄNDE", "BEGÅS", "KARDA", "SKÄLL", "BEROR", "SNÖAR", "STÄMT", "BUADE", "PASSA", "KÖPAS", "TIGGA", "BRÄNT", "VALDE", "AVSER", "KNIPA", "DÄMMA", "ÅNGRA", "RÄCKA", "GIFTA", "MÅDDE", "HÄKTA", "HÖJTS", "LÖSAS", "HÅNAT", "DÖPTE", "VÄCKT", "VÄGER", "JOBBA", "ELDAR", "KOKAS", "BÖRJA", "GYNNA", "SAKNA", "RADAT", "DUNKA", "LÅSTE", "SÄNDE", "VARAR", "BRAKA", "FINNS", "SÄNTS", "RASAR", "BYTAS", "RÄTTA", "YTTRA", "HÄVTS", "DEJTA", "AVSTÅ", "HUGGS", "KRÄVA", "HAKAR", "LURAT", "HÖJAS", "LAGAS", "DÖMDS", "FORMA", "SPANA", "LÖSTS", "FRIAS", "STYRA", "LYFTE", "LAGTS", "BRAST", "STÖTA", "SOLAT", "KAMMA", "RUBBA", "STÖRA", "NICKA", "YRKAS", "DOPAR", "RÖJTS", "DRÖJA", "VILAR", "MOBBA", "GLÖMT", "VISAT", "PLOGA", "FIKAR", "VUXIT", "DÖMDE", "INKOM", "LEDER", "DREVS", "NÅTTS", "KASTA", "HOTAT", "VARNA", "FUSKA", "KOMMA", "HYRTS", "SALTA", "SVARA", "SÄNDS", "GLESA", "RUCKA", "FÖDAS", "LÄRAS", "ÅDROG", "SNÖAT", "BETER", "JUBLA", "SPRED", "SÖKER", "HÖJER", "REDER", "POSTA", "HÄLSA", "PEKAT", "SLOPA", "RESER", "EBBAT", "HÖJDE", "LÖSER", "STACK", "SÅLDE", "LETAT", "KÄNNA", "KLARA", "ROSTA", "VRÄKT", "LEVRA", "NEKAR", "VALLA", "MATAR", "RÅKAT", "FIRAR", "FYLLT", "TYCKA", "RYCKT", "HÖRAS", "LISTA", "JÄSTE", "STÄDA", "GÖMMA", "UNDRA", "SVÄRA", "RAMLA", "BURIT", "SOVER", "SATSA", "ODLAS", "GRÄVA", "VISAS", "LUTAR", "KLURA", "RUSAT", "FASTA", "NÅDDE", "LOVAR", "VÄJER", "MÖTAS", "ÖNSKA", "MÅLAT", "GUIDA", "FIXAS", "VÄLJS", "GIFTE", "SKAKA", "VINNA", "GLASA", "ÄNDRA", "VILJA", "PEKAR", "ROPAR", "VÄXER", "TÄVLA", "VÄLTE", "BANAR", "SUGIT", "BYGGS", "BOMBA", "KIKAR", "HEJAR", "SUPER", "TUFFA", "SMÄLT", "LÄGGS", "DYKER", "STÄLL", "ODLAT", "RUSTA", "LYDDE", "LEVDE", "VILLE", "LÅNAR", "RÖKER", "LANDA", "TÄTAR", "DÖMTS", "FRIAR", "BODDE", "HOPPA", "SINAR", "BOXAS", "DÖMAS", "HACKA", "MUTAT", "BAKAR", "UTGÖR", "SMAKA", "MANAR", "HÖRDE", "LOVAT", "HETAT", "BRANN", "SLETS", "ANADE", "BILDA", "ANSÅG", "MÄTTE", "TYSTA", "VIDTA", "VÄNTA", "SUGER", "VÄLJA", "KÖPTS", "MÖGLA", "UTÖVA", "BISTÅ", "KÖADE", "JAGAT", "GÖMDE", "HAMNA", "MÖTTE", "STRED", "RÅDDE", "RITAT", "STYRS", "HEDRA", "KÖRAS"];
+      const wordCount = WORDS.length;
+      // Get the current date and determine the day of the year
+      const now = new Date();
+      const start = new Date(now.getFullYear(), 0, 0);
+      const diff = now - start;
+      const oneDay = 1000 * 60 * 60 * 24;
+      const dayIndex = Math.floor(diff / oneDay);
+      console.log(dayIndex, wordIndex);
+      // Calculate the word index and return the word
+      const index = (dayIndex * 3 + wordIndex) % wordCount;
+      return WORDS[index];
+    }
+
+    // Create an Initial State for given challengeIndex
+    function initialStateForChallengeIndex(challengeIndex) {
+      return {
+        challengeIndex: challengeIndex,
+        letterGrid: Array(6).fill().map(() => Array(5).fill().map(() => ({ content: "", bgColor: "#111" }))),
+        activeRow: 0, // The row that currently receives user input (0 ... 5)
+        selectedColumn: 0, // The column that currently receives user input (0 ... 4)
+        nonOccurring: [],
+      };
+    }
+    const states = [
+      initialStateForChallengeIndex(0),
+      initialStateForChallengeIndex(1),
+      initialStateForChallengeIndex(2),
+    ];
+    var state = states[0];
+
+    // Initialize the grids
+    function initializeGrids() {
+      // Populate Challenge Grid
+      for (let i = 0; i < 3; i++) {
+        const cell = document.createElement("div");
+        cell.classList.add("grid-cell");
+        cell.onclick = () => handleChallengeCellClick(i);
+        cell.textContent = "Ord " + (i + 1); 
+        challengeGrid.appendChild(cell);
+      }
+      // Populate Letter Grid
+      for (let i = 0; i < 6 * 5; i++) {
+        const cell = document.createElement("div");
+        cell.classList.add("grid-cell");
+        cell.onclick = () => handleLetterCellClick(i);
+        letterGrid.appendChild(cell);
+      }
+      // Populate Keyboard Grid
+      const keys = [
+        "A", "B", "C", "D", "E", "F", "G", "H",
+        "I", "J", "K", "L", "M", "N", "O", "P",
+        "Q", "R", "S", "T", "U", "V", "W", "X",
+        "Y", "Z", "Å", "Ä", "Ö", "⌫", "⏎", "↺"
+      ];
+      keys.forEach(key => {
+        const keyCell = document.createElement("div");
+        keyCell.classList.add("grid-cell");
+        keyCell.textContent = key;
+        keyCell.onclick = () => handleKeyboardCellClick(key);
+        keyboardGrid.appendChild(keyCell);
+      });
+    }
+
+    // Render function to update the UI based on the current state
+    function render() {
+      // Update state.letterGrid from other parts of state
+      Array.from(letterGrid.children).forEach((cell, index) => {
+        const row = Math.floor(index / 5);
+        const column = index % 5;
+        var bgCol = "#111";
+        if (row === state.activeRow) {
+          if (column === state.selectedColumn) {
+            bgCol = "#333";
+          } else {
+            bgCol = "#222";
+          }
+          state.letterGrid[row][column].bgColor = bgCol;
+        }
+      });
+      // Update challenge grid UI according to selected challenge
+      Array.from(challengeGrid.children).forEach((cell, index) => {
+        if (index === state.challengeIndex) {
+          cell.style.backgroundColor = "#642";
+        } else {
+          cell.style.backgroundColor = "#111";
+        }
+      });
+      // Update letter grid UI according to state.letterGrid
+      Array.from(letterGrid.children).forEach((cell, index) => {
+        const row = Math.floor(index / 5);
+        const column = index % 5;
+        cell.textContent = state.letterGrid[row][column].content;
+        cell.style.backgroundColor = state.letterGrid[row][column].bgColor;
+      });
+      // Update keyboard grid UI according to state.nonOccurring
+      console.log("-->", state.nonOccurring);
+      Array.from(keyboardGrid.children).forEach((cell) => {
+        if (state.nonOccurring.includes(cell.textContent)) {
+          cell.style.backgroundColor = "#111";
+        } else {
+          cell.style.backgroundColor = "";
+        }
+      });
+    }
+
+    // Handle challene cell clicks
+    function handleChallengeCellClick(index) {
+      state = states[index];
+      render();
+    }
+
+    // Handle letter grid cell clicks
+    function handleLetterCellClick(index) {
+      const row = Math.floor(index / 5);
+      const column = index % 5;
+      if (row !== state.activeRow) { return; }
+      state.selectedColumn = column;
+      render();
+    }
+
+    // Handle keyboard grid cell clicks
+    function handleKeyboardCellClick(key) {
+      if (key === "⌫") {
+        state.letterGrid[state.activeRow][state.selectedColumn].content = "";
+      } else if (key === "⏎") {
+        submitRow();
+        // Handle enter functionality (e.g., submit or confirm action)
+      } else if (key == "↺") {
+        console.log("Restart challenge");
+      } else {
+        state.letterGrid[state.activeRow][state.selectedColumn].content = key;
+        state.selectedColumn = (state.selectedColumn + 1) % 5;
+      }
+      render();
+    }
+
+    function submitRow() {
+      const row = state.activeRow;
+      for (let column = 0; column < 5; column++) {
+        if (state.letterGrid[row][column].content === "") {
+          console.log("beeep");
+          return;
+        }
+      }
+      // Mark status of each cell in the filled out active row
+      var word_ = getWordOfTheDay(state.challengeIndex).split("");
+      var word = getWordOfTheDay(state.challengeIndex).split("");
+      var correctCount = 0;
+      for (let column = 0; column < 5; column++) {
+        if (state.letterGrid[row][column].content === word[column]) {
+          state.letterGrid[row][column].bgColor = "#263";
+          correctCount += 1;
+          word[column] = "·";
+        } else if (word.includes(state.letterGrid[row][column].content)) {
+          state.letterGrid[row][column].bgColor = "#236";
+          word[column] = "·";
+        } else if (word_.includes(state.letterGrid[row][column].content) === false) {
+          state.nonOccurring.push(state.letterGrid[row][column].content);
+        }
+      }
+      if (correctCount === 5 || state.activeRow === 5) {
+        state.activeRow = -1;
+        render();
+        return;
+      }
+      state.activeRow += 1;
+      state.selectedColumn = 0;
+      render();
+    }
+    
+    // Initial setup and rendering
+    initializeGrids();
+    render();
+
+  </script>
+
+</body>
+</html>
