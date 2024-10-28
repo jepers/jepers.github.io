@@ -250,8 +250,11 @@
         } else if (word.includes(state.letterGrid[row][column].content)) {
           state.letterGrid[row][column].bgColor = "#236";
           word[column] = "·";
-        } else if (word_.includes(state.letterGrid[row][column].content) === false) {
-          state.nonOccurring.push(state.letterGrid[row][column].content);
+        } else {
+          state.letterGrid[row][column].bgColor = "#222";
+          if (word_.includes(state.letterGrid[row][column].content) === false) {
+            state.nonOccurring.push(state.letterGrid[row][column].content);
+          }
         }
       }
       if (correctCount === 5 || state.activeRow === 5) {
