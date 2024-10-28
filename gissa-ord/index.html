@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gissa Ord</title>
+  <title>Interactive Grid Layout with State</title>
   <style>
     * {
       box-sizing: border-box;
@@ -25,7 +25,7 @@
       flex-direction: column;
       justify-content: flex-start;
       align-items: center;
-      width: min(100vw, 53vh);
+      width: min(100vw, 44vh);
       height: 100vh;
       background-color: #222;
       padding: min(1vw, 1vh);
@@ -62,7 +62,7 @@
       align-items: center;
       background-color: #333;
       border: 1px solid #000;
-      font-size: calc(min(100vw, 58vh) / 16.0);
+      font-size: calc(min(100vw, 58vh) / 20.0);
       color: #aaa;
       cursor: pointer;
       user-select: none;
@@ -70,7 +70,7 @@
 
     .challenge-grid > .grid-cell {
       aspect-ratio: 3 / 1;
-      font-size: calc(min(100vw, 58vh) / 20.0);
+      font-size: calc(min(100vw, 58vh) / 24.0);
     }
     
     .letter-grid > .grid-cell {
@@ -104,7 +104,6 @@
       const diff = now - start;
       const oneDay = 1000 * 60 * 60 * 24;
       const dayIndex = Math.floor(diff / oneDay);
-      console.log(dayIndex, wordIndex);
       // Calculate the word index and return the word
       const index = (dayIndex * 3 + wordIndex) % wordCount;
       return WORDS[index];
@@ -192,7 +191,6 @@
         cell.style.backgroundColor = state.letterGrid[row][column].bgColor;
       });
       // Update keyboard grid UI according to state.nonOccurring
-      console.log("-->", state.nonOccurring);
       Array.from(keyboardGrid.children).forEach((cell) => {
         if (state.nonOccurring.includes(cell.textContent)) {
           cell.style.backgroundColor = "#111";
@@ -225,7 +223,7 @@
         submitRow();
         // Handle enter functionality (e.g., submit or confirm action)
       } else if (key == "↺") {
-        console.log("Restart challenge");
+        state = initialStateForChallengeIndex(state.challengeIndex);
       } else {
         state.letterGrid[state.activeRow][state.selectedColumn].content = key;
         state.selectedColumn = (state.selectedColumn + 1) % 5;
@@ -237,7 +235,6 @@
       const row = state.activeRow;
       for (let column = 0; column < 5; column++) {
         if (state.letterGrid[row][column].content === "") {
-          console.log("beeep");
           return;
         }
       }
