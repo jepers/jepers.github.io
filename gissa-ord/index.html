@@ -154,7 +154,7 @@
         "A", "B", "C", "D", "E", "F", "G", "H",
         "I", "J", "K", "L", "M", "N", "O", "P",
         "Q", "R", "S", "T", "U", "V", "W", "X",
-        "Y", "Z", "Å", "Ä", "Ö", "⌫", "⏎", "↺"
+        "Y", "Z", "Å", "Ä", "Ö", "⌫", "⏎", /* "↺" */
       ];
       keys.forEach(key => {
         const keyCell = document.createElement("div");
@@ -223,8 +223,10 @@
 
     // Handle keyboard grid cell clicks
     function handleKeyboardCellClick(key) {
+      if (state.activeRow == -1) { return; }
       if (key === "⌫") {
         state.letterGrid[state.activeRow][state.selectedColumn].content = "";
+        state.selectedColumn = (state.selectedColumn + 4) % 5;
       } else if (key === "⏎") {
         submitRow();
         // Handle enter functionality (e.g., submit or confirm action)
@@ -249,17 +251,18 @@
       var word = getWordOfTheDay(state.challengeIndex).split("");
       var correctCount = 0;
       for (let column = 0; column < 5; column++) {
-        if (state.letterGrid[row][column].content === word[column]) {
+        const letter = state.letterGrid[row][column].content;
+        if (letter === word[column]) {
           state.letterGrid[row][column].bgColor = "#263";
           correctCount += 1;
           word[column] = "·";
-        } else if (word.includes(state.letterGrid[row][column].content)) {
+        } else if (word.includes(letter)) {
           state.letterGrid[row][column].bgColor = "#236";
-          word[column] = "·";
+          word[word.indexOf(letter)] = "·";
         } else {
           state.letterGrid[row][column].bgColor = "#222";
-          if (word_.includes(state.letterGrid[row][column].content) === false) {
-            state.nonOccurring.push(state.letterGrid[row][column].content);
+          if (word_.includes(letter) === false) {
+            state.nonOccurring.push(letter);
           }
         }
       }
