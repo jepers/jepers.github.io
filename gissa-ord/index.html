@@ -134,6 +134,7 @@
 
     // Initialize the grids
     function initializeGrids() {
+      initializeStatesAndStateFromCookieIfAvailable();
       // Populate Challenge Grid
       for (let i = 0; i < 3; i++) {
         const cell = document.createElement("div");
@@ -164,7 +165,61 @@
         keyboardGrid.appendChild(keyCell);
       });
     }
-
+    
+    function saveStateAsCookie() {
+      setObjectsAsCookies({
+        state0: states[0],
+        state1: states[1],
+        state2: states[2],
+        state: state
+      });
+    }
+    
+    function initializeStatesAndStateFromCookieIfAvailable() {
+      objs = getCookiesAsObjects();
+      if (objs.state, objs.state0, objs.state1, objs.state2) {
+        states[0] = objs.state0;
+        states[1] = objs.state1;
+        states[2] = objs.state2;
+        state = objs.state;
+      }
+    }
+    
+    function setObjectsAsCookies(namedObjects) {
+      const now = new Date();
+      const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1); // Midnight expiry
+      const expires = midnight.toUTCString();
+      for (const [name, obj] of Object.entries(namedObjects)) {
+        const jsonStr = JSON.stringify(obj); // Convert object to JSON string
+        const encodedData = encodeURIComponent(jsonStr); // URL-encode for cookie storage
+        document.cookie = `${name}=${encodedData}; expires=${expires}; path=/; SameSite=Lax`;
+      }
+    }
+    
+    function getCookiesAsObjects() {
+      const cookies = document.cookie.split("; ");
+      const namedObjects = {};
+      for (const cookie of cookies) {
+        const [name, value] = cookie.split("=");
+        try {
+          // Decode the value and parse as JSON
+          namedObjects[name] = JSON.parse(decodeURIComponent(value));
+        } catch (error) {
+          // If parsing fails, ignore this cookie
+          // console.warn(`Could not parse cookie ${name}:`, error);
+        }
+      }
+      return namedObjects;
+    }
+    
+    function clearAllCookies() {
+      const cookies = document.cookie.split("; ");
+      for (const cookie of cookies) {
+        const name = cookie.split("=")[0];
+        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax`;
+      }
+    }
+    
     // Render function to update the UI based on the current state
     function render() {
       // Update state.letterGrid from other parts of state
@@ -210,6 +265,7 @@
     function handleChallengeCellClick(index) {
       state = states[index];
       render();
+      saveStateAsCookie();
     }
 
     // Handle letter grid cell clicks
@@ -229,7 +285,6 @@
         state.selectedColumn = (state.selectedColumn + 4) % 5;
       } else if (key === "⏎") {
         submitRow();
-        // Handle enter functionality (e.g., submit or confirm action)
       } else if (key == "↺") {
         state = initialStateForChallengeIndex(state.challengeIndex);
       } else {
@@ -268,12 +323,12 @@
       }
       if (correctCount === 5 || state.activeRow === 5) {
         state.activeRow = -1;
-        render();
-        return;
+      } else {
+        state.activeRow += 1;
+        state.selectedColumn = 0;
       }
-      state.activeRow += 1;
-      state.selectedColumn = 0;
       render();
+      saveStateAsCookie();
     }
     
     // Initial setup and rendering
