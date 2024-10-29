@@ -80,6 +80,12 @@
     .grid-cell:active {
       background-color: #444;
     }
+    
+    .grid-cell {
+      user-select: none; /* Prevents text selection */
+      -webkit-user-select: none; /* Ensures compatibility with iOS Safari */
+      -ms-user-select: none; /* IE11 and older */
+    }
   </style>
 </head>
 <body>
