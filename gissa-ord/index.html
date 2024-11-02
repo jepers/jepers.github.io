@@ -301,17 +301,16 @@
 
     // Handle keyboard grid cell clicks
     function handleKeyboardCellClick(key) {
+      if (key === "ⓘ") {
+        alert("Hej!\n\nOm du vill börja om helt från början med alla 3 orden så kan du skriva RESET(⏎).");
+        return;
+      }
       if (state.activeRow == -1) { return; }
       if (key === "⌫") {
         state.letterGrid[state.activeRow][state.selectedColumn].content = "";
         state.selectedColumn = (state.selectedColumn + 4) % 5;
-      } else if (key === "ⓘ") {
-        alert("Hej!\n\nOm du vill börja om helt från början med alla 3 orden så kan du skriva RESET(⏎).");
       } else if (key === "⏎") {
         submitRow();
-      } else if (key == "↺") {
-        state = initialStateForChallengeIndex(state.challengeIndex);
-        render();
       } else {
         state.letterGrid[state.activeRow][state.selectedColumn].content = key;
         state.selectedColumn = (state.selectedColumn + 1) % 5;
