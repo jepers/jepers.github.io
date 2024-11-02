@@ -262,8 +262,26 @@
           cell.style.backgroundColor = "";
         }
       });
+      // Show alert prompting if there is no more attempts/rows left:
+      if (isGameOver()) {
+        // Delay the alert to ensure DOM updates are complete
+        setTimeout(() => {
+          if (confirm("Vill du se lösningen?")) {
+            alert(getWordOfTheDay(state.challengeIndex));
+          }
+        }, 50.0);
+      }
     }
-
+    
+    function isGameOver() {
+      if (state.activeRow !== -1) { return false; }
+      for (let column = 0; column < 5; column++) {
+        if (state.letterGrid[5][column].content === "") { return false; }
+        if (state.letterGrid[5][column].bgColor !== "#263") { return true; }
+      }
+      return false;
+    }
+    
     // Handle challenge cell clicks
     function handleChallengeCellClick(index) {
       state = states[index];
@@ -273,6 +291,7 @@
 
     // Handle letter grid cell clicks
     function handleLetterCellClick(index) {
+      if (state.activeRow == -1) { return; }
       const row = Math.floor(index / 5);
       const column = index % 5;
       if (row !== state.activeRow) { return; }
