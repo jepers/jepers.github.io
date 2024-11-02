@@ -158,7 +158,7 @@
         "A", "B", "C", "D", "E", "F", "G", "H",
         "I", "J", "K", "L", "M", "N", "O", "P",
         "Q", "R", "S", "T", "U", "V", "W", "X",
-        "Y", "Z", "Å", "Ä", "Ö", "⌫", "⏎", /* "↺" */
+        "Y", "Z", "Å", "Ä", "Ö", "⌫", "⏎", "ⓘ", /* "↺" */
       ];
       keys.forEach(key => {
         const keyCell = document.createElement("div");
@@ -267,7 +267,7 @@
         // Delay the alert to ensure DOM updates are complete
         setTimeout(() => {
           if (confirm("Vill du se lösningen?")) {
-            alert(getWordOfTheDay(state.challengeIndex));
+            alert("Rätt ord är: " + getWordOfTheDay(state.challengeIndex));
           }
         }, 50.0);
       }
@@ -305,15 +305,18 @@
       if (key === "⌫") {
         state.letterGrid[state.activeRow][state.selectedColumn].content = "";
         state.selectedColumn = (state.selectedColumn + 4) % 5;
+      } else if (key === "ⓘ") {
+        alert("Hej!\n\nOm du vill börja om helt från början med alla 3 orden så kan du skriva RESET(⏎).");
       } else if (key === "⏎") {
         submitRow();
       } else if (key == "↺") {
         state = initialStateForChallengeIndex(state.challengeIndex);
+        render();
       } else {
         state.letterGrid[state.activeRow][state.selectedColumn].content = key;
         state.selectedColumn = (state.selectedColumn + 1) % 5;
+        render();
       }
-      render();
     }
 
     function submitRow() {
@@ -329,6 +332,7 @@
       const constWord = getWordOfTheDay(state.challengeIndex).split("");
       var word = getWordOfTheDay(state.challengeIndex).split("");
       var correctCount = 0;
+      var enteredWord = "";
       for (let column = 0; column < 5; column++) {
         const letter = state.letterGrid[row][column].content;
         if (letter === word[column]) {
@@ -338,6 +342,7 @@
         } else {
           state.letterGrid[row][column].bgColor = "#222";
         }
+        enteredWord += letter;
       }
       // Then go through the not correctly guessed letters and
       // mark the ones that are in the wrong position.
@@ -358,10 +363,18 @@
         showConfetti();
       } else if (state.activeRow === 5) {
         state.activeRow = -1;
-        // TODO: ...
       } else {
         state.activeRow += 1;
         state.selectedColumn = 0;
+      }
+      if (enteredWord === "RESET") {
+        // Delay the alert to ensure DOM updates are complete
+        setTimeout(() => {
+          if (confirm("Du skrev RESET, vill du börja om från början med alla 3 ord?")) {
+            clearAllCookies();
+            location.reload(true);
+          }
+        }, 50.0);
       }
       render();
       saveStateAsCookie();
