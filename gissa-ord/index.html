@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Interactive Grid Layout with State</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Gissa ord</title>
   <style>
     * {
       box-sizing: border-box;
@@ -312,7 +312,7 @@
           correctCount += 1;
           word[column] = "·";
         } else if (word.includes(letter)) {
-          state.letterGrid[row][column].bgColor = "#236";
+          state.letterGrid[row][column].bgColor = "#348";
           word[word.indexOf(letter)] = "·";
         } else {
           state.letterGrid[row][column].bgColor = "#222";
