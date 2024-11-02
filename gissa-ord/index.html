@@ -264,7 +264,7 @@
       });
     }
 
-    // Handle challene cell clicks
+    // Handle challenge cell clicks
     function handleChallengeCellClick(index) {
       state = states[index];
       render();
@@ -298,14 +298,16 @@
     }
 
     function submitRow() {
+      if (state.activeRow < 0 || state.activeRow > 5) { return; }
       const row = state.activeRow;
       for (let column = 0; column < 5; column++) {
         if (state.letterGrid[row][column].content === "") {
           return;
         }
       }
-      // Mark status of each cell in the filled out active row
-      var word_ = getWordOfTheDay(state.challengeIndex).split("");
+      // Mark status of each cell in the filled out active row.
+      // First check which letters are in the correct position.
+      const constWord = getWordOfTheDay(state.challengeIndex).split("");
       var word = getWordOfTheDay(state.challengeIndex).split("");
       var correctCount = 0;
       for (let column = 0; column < 5; column++) {
@@ -314,24 +316,74 @@
           state.letterGrid[row][column].bgColor = "#263";
           correctCount += 1;
           word[column] = "·";
-        } else if (word.includes(letter)) {
+        } else {
+          state.letterGrid[row][column].bgColor = "#222";
+        }
+      }
+      // Then go through the not correctly guessed letters and
+      // mark the ones that are in the wrong position.
+      for (let column = 0; column < 5; column++) {
+        if (state.letterGrid[row][column].bgColor == "#263") { continue; }
+        const letter = state.letterGrid[row][column].content;
+        if (word.includes(letter)) {
           state.letterGrid[row][column].bgColor = "#348";
           word[word.indexOf(letter)] = "·";
         } else {
-          state.letterGrid[row][column].bgColor = "#222";
-          if (word_.includes(letter) === false) {
+          if (constWord.includes(letter) === false) {
             state.nonOccurring.push(letter);
           }
         }
       }
-      if (correctCount === 5 || state.activeRow === 5) {
+      if (correctCount === 5) {
         state.activeRow = -1;
+        showConfetti();
+      } else if (state.activeRow === 5) {
+        state.activeRow = -1;
+        // TODO: ...
       } else {
         state.activeRow += 1;
         state.selectedColumn = 0;
       }
       render();
       saveStateAsCookie();
+    }
+    
+    function showConfetti() {
+      const numConfetti = 200; // Increase the number of confetti pieces
+      for (let i = 0; i < numConfetti; i++) {
+        const confetti = document.createElement('div');
+        Object.assign(confetti.style, {
+          position: 'fixed',
+          width: '3px',
+          height: '3px',
+          backgroundColor: `hsl(${Math.random() * 360}, 100%, 50%)`,
+          top: '50%',
+          left: '50%',
+          pointerEvents: 'none',
+          transform: `translate(-50%, -50%) rotate(${Math.random() * 360}deg)`,
+        });
+        document.body.appendChild(confetti);
+        const xVelocity = ((Math.random() - 0.5) * 2.5) * ((Math.random() - 0.5) * 2.5);
+        const yVelocity = Math.random() * -5 - 7;
+        const gravity = 0.3;
+        let x = 0;
+        let y = 0;
+        let scale = 1;
+        let currentYVelocity = yVelocity;
+        function animateConfetti() {
+          x += xVelocity;
+          y += currentYVelocity;
+          scale += 0.03;
+          currentYVelocity += gravity;
+          confetti.style.transform = `scale(${scale}) translate(${x}px, ${y}px) rotate(${Math.random() * 360}deg)`; 
+          if (y < window.innerHeight && Math.abs(x) < window.innerWidth) {
+            requestAnimationFrame(animateConfetti);
+          } else {
+            confetti.remove();
+          }
+        }
+        animateConfetti();
+      }
     }
     
     // Initial setup and rendering
