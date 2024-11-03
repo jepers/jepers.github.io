@@ -100,6 +100,11 @@
   </div>
 
   <script>
+    const theme = {
+      bgCorrect: "#263",
+      bgMisplaced: "#348",
+      bgIncorrect: "#222",
+    }
     const challengeGrid = document.getElementById("challengeGrid");
     const letterGrid = document.getElementById("letterGrid");
     const keyboardGrid = document.getElementById("keyboardGrid");
@@ -234,7 +239,7 @@
           if (column === state.selectedColumn) {
             bgCol = "#333";
           } else {
-            bgCol = "#222";
+            bgCol = theme.bgIncorrect;
           }
           state.letterGrid[row][column].bgColor = bgCol;
         }
@@ -277,7 +282,7 @@
       if (state.activeRow !== -1) { return false; }
       for (let column = 0; column < 5; column++) {
         if (state.letterGrid[5][column].content === "") { return false; }
-        if (state.letterGrid[5][column].bgColor !== "#263") { return true; }
+        if (state.letterGrid[5][column].bgColor !== theme.bgCorrect) { return true; }
       }
       return false;
     }
@@ -309,6 +314,7 @@
       if (key === "⌫") {
         state.letterGrid[state.activeRow][state.selectedColumn].content = "";
         state.selectedColumn = (state.selectedColumn + 4) % 5;
+        render();
       } else if (key === "⏎") {
         submitRow();
       } else {
@@ -335,21 +341,21 @@
       for (let column = 0; column < 5; column++) {
         const letter = state.letterGrid[row][column].content;
         if (letter === word[column]) {
-          state.letterGrid[row][column].bgColor = "#263";
+          state.letterGrid[row][column].bgColor = theme.bgCorrect;
           correctCount += 1;
           word[column] = "·";
         } else {
-          state.letterGrid[row][column].bgColor = "#222";
+          state.letterGrid[row][column].bgColor = theme.bgIncorrect;
         }
         enteredWord += letter;
       }
       // Then go through the not correctly guessed letters and
       // mark the ones that are in the wrong position.
       for (let column = 0; column < 5; column++) {
-        if (state.letterGrid[row][column].bgColor == "#263") { continue; }
+        if (state.letterGrid[row][column].bgColor == theme.bgCorrect) { continue; }
         const letter = state.letterGrid[row][column].content;
         if (word.includes(letter)) {
-          state.letterGrid[row][column].bgColor = "#348";
+          state.letterGrid[row][column].bgColor = theme.bgMisplaced;
           word[word.indexOf(letter)] = "·";
         } else {
           if (constWord.includes(letter) === false) {
