@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rectangles, Cannons & Balls — 512×512</title>
+<style>
+  :root {
+    --bg: #222;
+    --panel: #444;
+    --rect: #4a7;   /* Normal */
+    --booster: #c60;/* Booster */
+    --cannon: #fc4;
+    --ball: #fca;
+    --text: #ddd;
+    --muted: #aaa;
+  }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol"; }
+  .wrap { min-height: 100%; display: grid; place-items: center; padding: 24px 16px; }
+  .col { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+  .title { font-size: 14px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+  .stage { width: 512px; height: 512px; background: var(--panel); border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.06); position: relative; }
+  canvas { display: block; width: 512px; height: 512px; border-radius: 12px; touch-action: none; }
+  .toolbar { display: flex; gap: 24px; align-items: center; justify-content: center; user-select: none; }
+  .tool { font-size: 28px; line-height: 1; padding: 6px 8px; border-radius: 10px; cursor: pointer;
+    transition: transform .08s ease, background .15s ease; text-decoration-thickness: 3px; text-underline-offset: 6px; }
+  .tool:hover { transform: translateY(-1px) scale(1.05); background: rgba(255,255,255,.05); }
+  .tool.selected { text-decoration: underline; }
+
+  .subbar { display: none; gap: 10px; align-items: center; justify-content: center; user-select: none; }
+  .subbar.show { display: flex; }
+  .chip { font-size: 12px; padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18);
+    cursor: pointer; background: rgba(255,255,255,.06); }
+  .chip.selected { outline: 2px solid rgba(255,255,255,.55); }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -2px; }
+
+  .hint { font-size: 12px; color: var(--muted); text-align: center; }
+  .legend { font-size: 12px; color: var(--muted); opacity: .9; }
+  .row { display: flex; gap: 12px; align-items: center; justify-content: center; }
+  .kbd { font-family: ui-monospace, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 12px; padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(255,255,255,.15);
+    background: rgba(255,255,255,.06); color: #eee; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="col">
+      <div class="title">Action Area (512×512)</div>
+      <div class="stage">
+        <canvas id="canvas" width="512" height="512" aria-label="Action area"></canvas>
+      </div>
+
+      <div class="toolbar" id="toolbar" aria-label="Modes">
+        <span class="tool" data-mode="rect" title="Place / edit rectangles">🧱</span>
+        <span class="tool" data-mode="cannon" title="Place / edit cannons">🎯</span>
+        <span class="tool" data-mode="erase" title="Erase objects">🧽</span>
+      </div>
+
+      <div class="subbar" id="rectSubbar" aria-label="Rectangle type">
+        <span class="chip" data-kind="normal"><span class="sw" style="background:#4a7;"></span>Normal</span>
+        <span class="chip" data-kind="booster"><span class="sw" style="background:#c60;"></span>Booster</span>
+        <span class="legend">Tip: drag either end of a rectangle or cannon to adjust.</span>
+      </div>
+
+      <div class="hint">
+        <div class="row"><span class="legend">Rectangles: click end A → click end B. Drafts already collide with balls.</span></div>
+        <div class="row"><span class="legend">Cannons: click origin → click tip; fires every second. (Pauses while dragging)</span></div>
+        <div class="row"><span class="legend">Click outside the area & toolbar to deselect mode.</span></div>
+        <div class="row"><span class="kbd">Esc</span><span class="legend"> cancels current placement or dragging.</span></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  "use strict";
+
+  /********** CONSTANTS **********/
+  const W = 512, H = 512;
+  const RECT_HALF_THICK = 2;
+  const BALL_RAD = 1;
+  const RECT_MIN_LEN = 10, RECT_MAX_LEN = 600;
+  const CANNON_MIN_LEN = 10, CANNON_MAX_LEN = 600;
+
+  // Physics
+  const GRAVITY = 1000;
+  const SPEED_PER_LEN = 10;
+  const RESTITUTION_NORMAL = 0.8;
+  const RESTITUTION_BOOST = 1.2;
+  const CCD_EPS = 1e-6;
+  const SEP_BIAS = 0.15;
+  const MAX_BOUNCES_PER_SUBSTEP = 4;
+  const FIXED_DT = 1/240;
+  const MAX_FRAME_DT = 1/20;
+
+  // Firing
+  const FIRE_INTERVAL_MS = 1000;
+
+  // UI / hit testing
+  const ERASE_TOL = 6;
+  const GRAB_TOL = 10;
+
+  // Audio
+  const AMP_MAX = 0.5;
+  const AMP_PER_SPEED = 0.0003;
+  const AMP_ATTACK = 0.01;
+  const AMP_DECAY_TC = 0.3;
+
+  /********** HELPERS **********/
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const length = (x,y)=>Math.hypot(x,y);
+  const normalize = (x,y)=>{ const m=Math.hypot(x,y)||1; return {x:x/m,y:y/m}; };
+  const rot = (x,y,a)=>{ const c=Math.cos(a),s=Math.sin(a); return {x:x*c - y*s, y:x*s + y*c}; };
+  const toLocal = (px,py,cx,cy,ang)=> rot(px - cx, py - cy, -ang);
+
+  function distPointSeg(px,py,ax,ay,bx,by){
+    const vx=bx-ax, vy=by-ay, wx=px-ax, wy=py-ay;
+    const l2=vx*vx+vy*vy || 1;
+    let t=(wx*vx+wy*vy)/l2; t=clamp(t,0,1);
+    const qx=ax+vx*t, qy=ay+vy*t;
+    return Math.hypot(px-qx, py-qy);
+  }
+
+  /********** AUDIO **********/
+  let audioCtx = null;
+  const ensureAudio = ()=> audioCtx ??= new (window.AudioContext||window.webkitAudioContext)();
+  const heightToHz = y => 40 + (1 - clamp(y / H, 0, 1)) * 1024;
+  function createVoice(){ const ctx=ensureAudio(); const osc=ctx.createOscillator(); osc.type='sine';
+    const gain=ctx.createGain(); gain.gain.value=0; osc.connect(gain).connect(ctx.destination); osc.start();
+    return {ctx,osc,gain}; }
+  const impactAmp = s => Math.min(AMP_MAX, Math.max(0, s * AMP_PER_SPEED));
+  function triggerEnv(v, amp){ const {ctx,gain}=v; const now=ctx.currentTime; const tgt=Math.min(AMP_MAX,Math.max(0,amp));
+    gain.gain.cancelScheduledValues(now); gain.gain.setValueAtTime(gain.gain.value, now);
+    gain.gain.linearRampToValueAtTime(tgt, now+AMP_ATTACK);
+    gain.gain.setTargetAtTime(0, now+AMP_ATTACK, AMP_DECAY_TC); }
+  function fadeOut(v){ const {ctx,gain,osc}=v; const now=ctx.currentTime; gain.gain.cancelScheduledValues(now);
+    gain.gain.setTargetAtTime(0, now, 0.05); osc.stop(now+0.25);
+    setTimeout(()=>{ try{osc.disconnect(); gain.disconnect();}catch(_){} }, 350); }
+
+  /********** PRIMITIVES **********/
+  class Rect {
+    constructor(cx,cy,len,ang,restitution,color){ this.cx=cx; this.cy=cy; this.len=len; this.ang=ang; this.restitution=restitution; this.color=color; }
+    draw(ctx, alpha=1){ ctx.save(); ctx.translate(this.cx,this.cy); ctx.rotate(this.ang);
+      ctx.globalAlpha=alpha; ctx.fillStyle=this.color; ctx.fillRect(-this.len/2, -RECT_HALF_THICK, this.len, RECT_HALF_THICK*2);
+      ctx.restore(); ctx.globalAlpha=1; }
+    endpoints(){ const ux=Math.cos(this.ang), uy=Math.sin(this.ang);
+      return { ax:this.cx-ux*this.len/2, ay:this.cy-uy*this.len/2, bx:this.cx+ux*this.len/2, by:this.cy+uy*this.len/2 }; }
+    setFromEnds(a,b){ let L=clamp(length(b.x-a.x,b.y-a.y), RECT_MIN_LEN, RECT_MAX_LEN);
+      const ang=Math.atan2(b.y-a.y,b.x-a.x); this.cx=(a.x+(a.x+Math.cos(ang)*L))/2; this.cy=(a.y+(a.y+Math.sin(ang)*L))/2; this.len=L; this.ang=ang; }
+    collideCapsule(p0x,p0y,vx,vy,dt){
+      const halfLen=this.len/2, R=RECT_HALF_THICK+BALL_RAD;
+      const p0=toLocal(p0x,p0y,this.cx,this.cy,this.ang), v=rot(vx,vy,-this.ang);
+      let best=null;
+      if(Math.abs(v.y)>CCD_EPS){ for(const sgn of [+1,-1]){ const ty=sgn*R, t=(ty-p0.y)/v.y;
+        if(t>CCD_EPS && t<=dt+CCD_EPS){ const xAt=p0.x+v.x*t; if(Math.abs(xAt)<=halfLen+CCD_EPS){
+          const nW=rot(0,sgn,this.ang); if(!best||t<best.t) best={t, nx:nW.x, ny:nW.y}; } } } }
+      const checkCap=(cxLocal)=>{ const dx=p0.x-cxLocal, dy=p0.y, a=v.x*v.x+v.y*v.y; if(a<CCD_EPS) return;
+        const b=2*(dx*v.x+dy*v.y), c=dx*dx+dy*dy-R*R, disc=b*b-4*a*c; if(disc<0) return; const s=Math.sqrt(disc);
+        const ts=[(-b-s)/(2*a), (-b+s)/(2*a)]; for(const t of ts){ if(t>CCD_EPS && t<=dt+CCD_EPS){
+          const ix=p0.x+v.x*t, iy=p0.y+v.y*t; const nl=normalize(ix-cxLocal, iy-0); const nW=rot(nl.x,nl.y,this.ang);
+          if(!best||t<best.t) best={t, nx:nW.x, ny:nW.y}; } } };
+      checkCap(+halfLen); checkCap(-halfLen); return best;
+    }
+  }
+
+  class Cannon {
+    constructor(ox,oy,len,ang){ this.ox=ox; this.oy=oy; this.len=len; this.ang=ang; this.timer=null; this.paused=false; }
+    draw(ctx){ const ux=Math.cos(this.ang), uy=Math.sin(this.ang); const x2=this.ox+ux*this.len, y2=this.oy+uy*this.len;
+      ctx.lineWidth=2; ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--cannon').trim()||'#fc4'; ctx.fillStyle=ctx.strokeStyle;
+      ctx.beginPath(); ctx.moveTo(this.ox,this.oy); ctx.lineTo(x2,y2); ctx.stroke();
+      const ah=Math.min(10,this.len*0.25); const angL=this.ang+Math.PI-Math.PI/7, angR=this.ang+Math.PI+Math.PI/7;
+      ctx.beginPath(); ctx.moveTo(x2,y2); ctx.lineTo(x2+Math.cos(angL)*ah, y2+Math.sin(angL)*ah);
+      ctx.lineTo(x2+Math.cos(angR)*ah, y2+Math.sin(angR)*ah); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(this.ox,this.oy,2.5,0,Math.PI*2); ctx.fill(); }
+    endpoints(){ const tip={ x:this.ox+Math.cos(this.ang)*this.len, y:this.oy+Math.sin(this.ang)*this.len };
+      return { ax:this.ox, ay:this.oy, bx:tip.x, by:tip.y }; }
+    setFromEnds(a,b){ const L=clamp(length(b.x-a.x,b.y-a.y), CANNON_MIN_LEN, CANNON_MAX_LEN); const ang=Math.atan2(b.y-a.y,b.x-a.x);
+      this.ox=a.x; this.oy=a.y; this.len=L; this.ang=ang; }
+  }
+
+  class Ball { constructor(x,y,vx,vy,voice){ this.x=x; this.y=y; this.vx=vx; this.vy=vy; this.voice=voice; this.alive=true; }
+    draw(ctx){ ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--ball').trim()||'#fca';
+      ctx.fillRect(Math.round(this.x - BALL_RAD), Math.round(this.y - BALL_RAD), BALL_RAD*2, BALL_RAD*2); } }
+
+  /********** WORLD **********/
+  class World {
+    constructor(ctx2d){
+      this.ctx=ctx2d; this.rects=[]; this.cannons=[]; this.balls=[]; this._accum=0;
+      this.rectDraft=null; this.cannonDraft=null; this.rectKind='normal';
+      this.drag=null; // {type:'rect'|'cannon', idx, which:'A'|'B', other:{x,y}}
+    }
+
+    rectProps(kind){ return (kind==='booster') ? { restitution: RESTITUTION_BOOST, color:'#c60' }
+                                               : { restitution: RESTITUTION_NORMAL, color:'#4a7' }; }
+
+    addRectFromEnds(a,b,kind){
+      const {restitution,color}=this.rectProps(kind);
+      let L=clamp(length(b.x-a.x,b.y-a.y), RECT_MIN_LEN, RECT_MAX_LEN);
+      const ang=Math.atan2(b.y-a.y,b.x-a.x);
+      const cx=(a.x+(a.x+Math.cos(ang)*L))/2, cy=(a.y+(a.y+Math.sin(ang)*L))/2;
+      this.rects.push(new Rect(cx,cy,L,ang,restitution,color));
+    }
+
+    addCannon(a,b){
+      const L=clamp(length(b.x-a.x,b.y-a.y), CANNON_MIN_LEN, CANNON_MAX_LEN);
+      const ang=Math.atan2(b.y-a.y,b.x-a.x);
+      const c=new Cannon(a.x,a.y,L,ang);
+      this.cannons.push(c);
+      this.spawnBall(c);
+      this.startCannonTimer(c);
+    }
+
+    removeCannon(c){ this.stopCannonTimer(c); const i=this.cannons.indexOf(c); if(i>=0)this.cannons.splice(i,1); }
+
+    // Cannon timers / pause-resume
+    startCannonTimer(c){ this.stopCannonTimer(c); c.timer=setInterval(()=>this.spawnBall(c), FIRE_INTERVAL_MS); c.paused=false; }
+    stopCannonTimer(c){ if(c.timer){ clearInterval(c.timer); c.timer=null; } }
+    pauseCannon(c){ this.stopCannonTimer(c); c.paused=true; }
+    resumeCannon(c, fireImmediate=true){ if(fireImmediate) this.spawnBall(c); this.startCannonTimer(c); }
+
+    spawnBall(c){
+      const ux=Math.cos(c.ang), uy=Math.sin(c.ang);
+      const speed=SPEED_PER_LEN * c.len;
+      const px=c.ox+ux*c.len, py=c.oy+uy*c.len;
+      const vx=ux*speed, vy=uy*speed;
+      const voice=createVoice(); voice.osc.frequency.value=heightToHz(py);
+      triggerEnv(voice, impactAmp(length(vx,vy)));
+      this.balls.push(new Ball(px,py,vx,vy,voice));
+    }
+
+    colliders(){
+      const list=[...this.rects];
+      if(this.rectDraft){
+        const {a,b,kind}=this.rectDraft, props=this.rectProps(kind);
+        let L=clamp(length(b.x-a.x,b.y-a.y), RECT_MIN_LEN, RECT_MAX_LEN);
+        const ang=Math.atan2(b.y-a.y,b.x-a.x);
+        const cx=(a.x+(a.x+Math.cos(ang)*L))/2, cy=(a.y+(a.y+Math.sin(ang)*L))/2;
+        list.push(new Rect(cx,cy,L,ang,props.restitution,props.color));
+      }
+      return list;
+    }
+
+    update(dt){
+      this._accum += Math.min(dt, MAX_FRAME_DT);
+      while(this._accum >= FIXED_DT){ this.step(FIXED_DT); this._accum -= FIXED_DT; }
+    }
+
+    step(dt){
+      for(let i=this.balls.length-1;i>=0;i--){
+        const b=this.balls[i]; if(!b.alive) continue;
+        b.vy += GRAVITY*dt;
+
+        let tRemain=dt, bounces=0;
+        while(tRemain>CCD_EPS && bounces<MAX_BOUNCES_PER_SUBSTEP){
+          let best=null, bestRest=RESTITUTION_NORMAL;
+          for(const r of this.colliders()){
+            const hit=r.collideCapsule(b.x,b.y,b.vx,b.vy,tRemain);
+            if(hit && (!best || hit.t<best.t)){ best=hit; bestRest=r.restitution; }
+          }
+          if(!best){ b.x += b.vx*tRemain; b.y += b.vy*tRemain; break; }
+
+          b.x += b.vx*best.t; b.y += b.vy*best.t;
+
+          const n=normalize(best.nx,best.ny);
+          const vdotn=b.vx*n.x + b.vy*n.y;
+          b.vx = b.vx - (1+bestRest)*vdotn*n.x;
+          b.vy = b.vy - (1+bestRest)*vdotn*n.y;
+          b.x += n.x*SEP_BIAS; b.y += n.y*SEP_BIAS;
+
+          triggerEnv(b.voice, impactAmp(Math.abs(vdotn)));
+
+          tRemain -= best.t; bounces++;
+        }
+
+        if(audioCtx){
+          const t=audioCtx.currentTime, hz=heightToHz(b.y);
+          try{ b.voice.osc.frequency.cancelScheduledValues(t);
+               b.voice.osc.frequency.linearRampToValueAtTime(hz, t+0.02); }catch(_){}
+        }
+
+        if(b.x<-BALL_RAD || b.x>W+BALL_RAD || b.y<-BALL_RAD || b.y>H+BALL_RAD){
+          b.alive=false; fadeOut(b.voice); this.balls.splice(i,1);
+        }
+      }
+    }
+
+    draw(){
+      const ctx=this.ctx;
+      ctx.clearRect(0,0,W,H);
+      this.rects.forEach(r=>r.draw(ctx));
+      this.cannons.forEach(c=>c.draw(ctx));
+      this.balls.forEach(b=>b.draw(ctx));
+
+      if(this.cannonDraft){
+        const {origin,len,ang}=this.cannonDraft;
+        const x2=origin.x+Math.cos(ang)*len, y2=origin.y+Math.sin(ang)*len;
+        ctx.globalAlpha=.7; ctx.lineWidth=2; ctx.strokeStyle='#fc4';
+        ctx.beginPath(); ctx.moveTo(origin.x,origin.y); ctx.lineTo(x2,y2); ctx.stroke(); ctx.globalAlpha=1;
+      }
+      if(this.rectDraft){
+        const {a,b,kind}=this.rectDraft, props=this.rectProps(kind);
+        let L=clamp(length(b.x-a.x,b.y-a.y), RECT_MIN_LEN, RECT_MAX_LEN);
+        const ang=Math.atan2(b.y-a.y,b.x-a.x);
+        const cx=(a.x+(a.x+Math.cos(ang)*L))/2, cy=(a.y+(a.y+Math.sin(ang)*L))/2;
+        new Rect(cx,cy,L,ang,props.restitution,props.color).draw(ctx,0.6);
+      }
+
+      if(this.drag){
+        const d=this.drag, o=(d.type==='rect'?this.rects:this.cannons)[d.idx].endpoints();
+        const gx=(d.which==='A'?o.ax:o.bx), gy=(d.which==='A'?o.ay:o.by);
+        ctx.fillStyle='#fff'; ctx.globalAlpha=.9; ctx.beginPath(); ctx.arc(gx,gy,4,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1;
+      }
+    }
+  }
+
+  /********** BOOTSTRAP & UI **********/
+  const canvas=document.getElementById('canvas');
+  const g=canvas.getContext('2d');
+  const toolbar=document.getElementById('toolbar');
+  const toolButtons=[...toolbar.querySelectorAll('.tool')];
+  const subbar=document.getElementById('rectSubbar');
+  const chips=[...subbar.querySelectorAll('.chip')];
+
+  const world=new World(g);
+  let mode=null; let pointerDown=false;
+
+  function setMode(m){
+    // If leaving a cannon drag, resume its firing
+    if(world.drag && world.drag.type==='cannon'){
+      const c = world.cannons[world.drag.idx];
+      world.resumeCannon(c, true);
+    }
+    mode=m;
+    toolButtons.forEach(b=>b.classList.toggle('selected', b.dataset.mode===m));
+    subbar.classList.toggle('show', m==='rect');
+    world.rectDraft=null; world.cannonDraft=null; world.drag=null;
+  }
+
+  function updateChips(){ chips.forEach(c=>c.classList.toggle('selected', c.dataset.kind===world.rectKind)); }
+  updateChips();
+
+  function getMouse(evt){
+    const r=canvas.getBoundingClientRect();
+    return { x:(evt.clientX - r.left)*(canvas.width/r.width),
+             y:(evt.clientY - r.top) *(canvas.height/r.height) };
+  }
+
+  // Mode toolbar
+  toolbar.addEventListener('click', e=>{
+    const btn=e.target.closest('.tool'); if(!btn) return;
+    const m=btn.dataset.mode; if(mode===m) setMode(null); else { setMode(m); ensureAudio()?.resume?.(); }
+    e.stopPropagation();
+  });
+  // Subbar (rect type)
+  subbar.addEventListener('click', e=>{
+    const chip=e.target.closest('.chip'); if(!chip) return;
+    world.rectKind=chip.dataset.kind; updateChips();
+  });
+  // Deselect when clicking outside
+  document.addEventListener('pointerdown', e=>{
+    if(e.target!==canvas && !toolbar.contains(e.target) && !subbar.contains(e.target)) setMode(null);
+  });
+
+  // Helper: start endpoint drag
+  function tryStartEndpointDrag(list, p, type){
+    for(let i=list.length-1;i>=0;i--){
+      const o=list[i].endpoints();
+      const dA=Math.hypot(p.x-o.ax, p.y-o.ay);
+      const dB=Math.hypot(p.x-o.bx, p.y-o.by);
+      if(dA<=GRAB_TOL || dB<=GRAB_TOL){
+        world.drag={ type, idx:i, which:(dA<=dB?'A':'B'),
+                     other:(dA<=dB?{x:o.bx,y:o.by}:{x:o.ax,y:o.ay}) };
+        // Pause cannon while dragging
+        if(type==='cannon'){ world.pauseCannon(list[i]); }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Pointer interactions
+  canvas.addEventListener('pointerdown', e=>{
+    pointerDown=true; canvas.setPointerCapture(e.pointerId);
+    const p=getMouse(e); ensureAudio()?.resume?.();
+
+    if(mode==='rect'){
+      if(!world.rectDraft && !world.drag){
+        if(tryStartEndpointDrag(world.rects, p, 'rect')) return;
+      }
+      if(!world.rectDraft && !world.drag){
+        world.rectDraft={ a:p, b:p, kind:world.rectKind };
+      }
+    } else if(mode==='cannon'){
+      if(!world.drag){
+        if(tryStartEndpointDrag(world.cannons, p, 'cannon')) return;
+      }
+      if(!world.cannonDraft && !world.drag){
+        world.cannonDraft={ origin:p, len:CANNON_MIN_LEN, ang:0 };
+      }
+    }
+  });
+
+  canvas.addEventListener('pointermove', e=>{
+    if(!pointerDown) return;
+    const p=getMouse(e);
+
+    if(world.drag){
+      const group = (world.drag.type==='rect') ? world.rects : world.cannons;
+      const obj = group[world.drag.idx];
+      const other = world.drag.other;
+      const a = (world.drag.which==='A') ? p : other;
+      const b = (world.drag.which==='A') ? other : p;
+      obj.setFromEnds(a,b);
+      return;
+    }
+
+    if(mode==='rect' && world.rectDraft){
+      world.rectDraft.b=p;
+    } else if(mode==='cannon' && world.cannonDraft){
+      const d={ x:p.x - world.cannonDraft.origin.x, y:p.y - world.cannonDraft.origin.y };
+      world.cannonDraft.len = clamp(length(d.x,d.y), CANNON_MIN_LEN, CANNON_MAX_LEN);
+      world.cannonDraft.ang = Math.atan2(d.y,d.x);
+    }
+  });
+
+  canvas.addEventListener('pointerup', e=>{
+    pointerDown=false; try{canvas.releasePointerCapture(e.pointerId);}catch(_){}
+    const p=getMouse(e);
+
+    if(world.drag){
+      // If it was a cannon drag, resume firing immediately with a shot
+      if(world.drag.type==='cannon'){
+        const c = world.cannons[world.drag.idx];
+        world.resumeCannon(c, true);
+      }
+      world.drag=null;
+      return;
+    }
+
+    if(mode==='rect' && world.rectDraft){
+      world.addRectFromEnds(world.rectDraft.a, p, world.rectDraft.kind);
+      world.rectDraft=null;
+    } else if(mode==='cannon' && world.cannonDraft){
+      const tip={ x: world.cannonDraft.origin.x + Math.cos(world.cannonDraft.ang)*world.cannonDraft.len,
+                  y: world.cannonDraft.origin.y + Math.sin(world.cannonDraft.ang)*world.cannonDraft.len };
+      world.addCannon(world.cannonDraft.origin, tip);
+      world.cannonDraft=null;
+    } else if(mode==='erase'){
+      let erased=false;
+      for(let i=world.rects.length-1;i>=0 && !erased;i--){
+        const r=world.rects[i], e=r.endpoints();
+        if(distPointSeg(p.x,p.y,e.ax,e.ay,e.bx,e.by) <= RECT_HALF_THICK + ERASE_TOL){ world.rects.splice(i,1); erased=true; }
+      }
+      if(!erased){
+        for(let i=world.cannons.length-1;i>=0 && !erased;i--){
+          const c=world.cannons[i], e=c.endpoints();
+          if(distPointSeg(p.x,p.y,e.ax,e.ay,e.bx,e.by) <= ERASE_TOL){ world.removeCannon(c); erased=true; }
+        }
+      }
+    }
+  });
+
+  window.addEventListener('keydown', e=>{
+    if(e.key==='Escape'){
+      // If canceling a cannon drag, resume it too
+      if(world.drag && world.drag.type==='cannon'){
+        const c = world.cannons[world.drag.idx];
+        world.resumeCannon(c, true);
+      }
+      world.rectDraft=null; world.cannonDraft=null; world.drag=null;
+    }
+  });
+
+  // Main loop
+  let last=performance.now();
+  function frame(now){
+    const dt=Math.min(MAX_FRAME_DT, (now-last)/1000); last=now;
+    world.update(dt);
+    world.draw();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // Cleanup
+  window.addEventListener('beforeunload', ()=>{
+    world.cannons.forEach(c=>world.stopCannonTimer(c));
+    world.balls.forEach(b=>b.voice && fadeOut(b.voice));
+  });
+
+  // Start with no selection
+  setMode(null);
+})();
+</script>
+</body>
+</html>
