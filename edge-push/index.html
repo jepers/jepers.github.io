@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Edge Push — 2P</title>
+<style>
+  :root { --bg:#333; --arena:#444; --score:#aaa; }
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--score);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .game{display:flex;flex-direction:column;align-items:center;gap:8px;user-select:none;}
+  .score-row{width:var(--arenaSizePx,300px);display:grid;grid-template-columns:1fr 1fr;align-items:end;line-height:1;}
+  .score{font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.6);font-size:clamp(14px,calc(var(--arenaSizePx,300px)*.05),28px)}
+  .score.p1{text-align:left}.score.p2{text-align:right}
+  canvas{background:var(--arena);display:block;width:var(--arenaSizePx,300px);height:var(--arenaSizePx,300px);box-shadow:0 8px 24px rgba(0,0,0,.35)}
+  .banner{position:fixed;inset:0;display:none;place-items:center;background:rgba(0,0,0,.35);backdrop-filter:blur(2px)}
+  .banner.show{display:grid}
+  .banner .card{background:#222;color:#eee;padding:20px 28px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.5);text-align:center;max-width:85vw}
+  .banner h1{margin:0 0 8px 0;font-size:clamp(20px,4vw,36px)}
+  .banner p{margin:0;opacity:.9}
+  .hints{margin-top:8px;opacity:.7;font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+  <div class="game">
+    <div class="score-row">
+      <div class="score p1" id="scoreP1">0</div>
+      <div class="score p2" id="scoreP2">0</div>
+    </div>
+    <canvas id="arena" width="900" height="900"></canvas>
+    <div class="hints">P1: W A S D, Fire: B · P2: Arrow Keys, Fire: Enter — First to 10 wins · Space to dismiss win</div>
+  </div>
+
+  <div class="banner" id="banner">
+    <div class="card">
+      <h1 id="bannerText">Player 1 Wins!</h1>
+      <p>Press <b>Space</b> to start a new match</p>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ===== Parameters =====
+  const params = {
+    thrust: 2.5,                 // units/s^2
+    damping: 0.25,               // per-second damping; applied as pow(damping, dt)
+    maxSpeed: 3.0,               // units/s
+    wallRestitution: 0.7,
+    circleRestitution: 1.8,      // super bouncy player<->player
+    bulletRestitution: 0.999,    // any collision with bullets uses this
+    bulletDamping: 0.6,          // per-second damping for bullets (tunable)
+    collisionIterations: 3,      // resolution passes per frame (player-player only)
+    freezeMsOnScore: 1000,
+    winScore: 10,
+    soundEnabled: true,
+    soundVolume: 0.6,            // master 0..1
+    // Indicator + shooting
+    minIndicatorSpeed: 0.4,      // show indicator & allow firing only if speed >= this
+    bulletRadius: 0.05,          // world units at spawn
+    bulletMaxBounces: 10,        // <-- updated: lasts for 10 bounces (removed at 10)
+    bulletFinalRadiusPx: 2,      // <-- target visual/physics radius ~2px just before final
+    bulletSpeedFactor: 5,        // bullet speed = factor * playerSpeed
+    p1Color: '#3fa7ff',
+    p2Color: '#ff5555'
+  };
+
+  // ===== Canvas & layout =====
+  const canvas = document.getElementById('arena');
+  const ctx = canvas.getContext('2d');
+  const scoreP1El = document.getElementById('scoreP1');
+  const scoreP2El = document.getElementById('scoreP2');
+  const banner = document.getElementById('banner');
+  const bannerText = document.getElementById('bannerText');
+  const gameRoot = document.querySelector('.game');
+
+  function resize() {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const reservedTop = 64, reservedBottom = 36;
+    const maxSquare = Math.min(vw - 16, vh - reservedTop - reservedBottom);
+    const arenaSize = Math.max(200, Math.floor(maxSquare));
+    canvas.width = arenaSize; canvas.height = arenaSize;
+    gameRoot.style.setProperty('--arenaSizePx', `${arenaSize}px`);
+  }
+  window.addEventListener('resize', resize, { passive: true }); resize();
+
+  // ===== World <-> Screen =====
+  const w2s = (x,y)=>[(x+1)*0.5*canvas.width,(y+1)*0.5*canvas.height];
+  const r2s = r => r*0.5*canvas.width;
+
+  // ===== WebAudio SFX =====
+  let audioCtx = null;
+  const ensureAudio = () => {
+    if (!params.soundEnabled) return null;
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext||window.webkitAudioContext)(); } catch { return null; } }
+    return audioCtx;
+  };
+  function tone({freq=300, dur=0.08, type='sine', vol=1.0, sweep=1.0}) {
+    if (!params.soundEnabled) return;
+    const ac = ensureAudio(); if (!ac) return;
+    const t0 = ac.currentTime, t1 = t0 + dur;
+    const osc = ac.createOscillator(), gain = ac.createGain();
+    osc.type = type; osc.frequency.setValueAtTime(freq, t0);
+    if (sweep !== 1.0) osc.frequency.exponentialRampToValueAtTime(Math.max(1, freq*sweep), t1);
+    const v = Math.max(0, Math.min(1, params.soundVolume*vol));
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.35*v+0.001, t0+0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t1);
+    osc.connect(gain).connect(ac.destination);
+    osc.start(t0); osc.stop(t1+0.01);
+  }
+  const sfx = {
+    wall(){ tone({freq:240,dur:0.05, type:'sine', sweep:0.75, vol:0.8}); },
+    circle(){ tone({freq:320,dur:0.05, type:'sine', sweep:0.8, vol:0.8}); },
+    score(){ tone({freq:420,dur:0.06,type:'triangle',sweep:1.15,vol:1.0});
+             setTimeout(()=>tone({freq:560,dur:0.07,type:'triangle',sweep:1.05,vol:1.0}), 50); },
+    win(){   tone({freq:420,dur:0.10,type:'square',sweep:1.0,vol:1.0});
+             setTimeout(()=>tone({freq:560,dur:0.12,type:'square',sweep:1.0,vol:1.0}),100);
+             setTimeout(()=>tone({freq:700,dur:0.16,type:'square',sweep:1.0,vol:1.0}),220); },
+    bulletWall(){   tone({freq:260,dur:0.035,type:'sine',sweep:0.85,vol:0.8}); },
+    bulletCircle(){ tone({freq:360,dur:0.04, type:'triangle',sweep:0.9, vol:0.9}); },
+    bulletBullet(){ tone({freq:500,dur:0.03, type:'square',  sweep:0.95,vol:0.7}); }
+  };
+
+  // ===== Game state =====
+  const world = {
+    p1: { x:-0.75, y:0.0, vx:0, vy:0, r:0.1, color: params.p1Color },
+    p2: { x: 0.75, y:0.0, vx:0, vy:0, r:0.1, color: params.p2Color },
+    bullets: [], // {x,y,vx,vy,r,color,bounces,initialR}
+    score1: 0, score2: 0,
+    frozenUntil: 0,
+    matchOver: false,
+    scoreLock: false
+  };
+
+  function resetPositionsZeroVel() {
+    world.p1.x=-0.75; world.p1.y=0; world.p1.vx=0; world.p1.vy=0;
+    world.p2.x= 0.75; world.p2.y=0; world.p2.vx=0; world.p2.vy=0;
+    world.bullets.length = 0; // clear bullets on score/reset
+    world.scoreLock = false;
+  }
+  function updateScoreUI(){ scoreP1El.textContent = world.score1; scoreP2El.textContent = world.score2; }
+  function showBanner(text){ bannerText.textContent=text; banner.classList.add('show'); }
+  function hideBanner(){ banner.classList.remove('show'); }
+  function newMatch(){ world.score1=0; world.score2=0; updateScoreUI(); resetPositionsZeroVel(); world.matchOver=false; hideBanner(); }
+
+  // ===== Input =====
+  const keys = Object.create(null);
+  const isControl = code => ['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowLeft','ArrowDown','ArrowRight','Space','Enter','KeyB'].includes(code);
+
+  window.addEventListener('keydown', (e) => {
+    if (isControl(e.code)) e.preventDefault();
+    if (world.matchOver) {
+      if (e.code === 'Space') newMatch();
+      return;
+    }
+    // Fire on keydown edge (ignore repeats)
+    if (!e.repeat) {
+      if (e.code === 'KeyB') tryFire(world.p1);
+      else if (e.code === 'Enter') tryFire(world.p2);
+    }
+    keys[e.code] = true;
+  }, { passive: false });
+
+  window.addEventListener('keyup', (e) => {
+    if (isControl(e.code)) e.preventDefault();
+    keys[e.code] = false;
+  }, { passive: false });
+
+  // ===== Helpers =====
+  const clamp = (n,a,b)=>Math.max(a,Math.min(b,n));
+  const speedOf = p => Math.hypot(p.vx, p.vy);
+  const finalBulletWorldRadius = () => params.bulletFinalRadiusPx / (0.5 * canvas.width);
+
+  function updateBulletRadius(b){
+    // Linearly shrink from initialR to final (2px in world units) across bounces 0..(max-1)
+    const maxSteps = Math.max(1, params.bulletMaxBounces - 1); // avoid div by 0
+    const t = clamp(b.bounces / maxSteps, 0, 1);
+    const rFinal = finalBulletWorldRadius();
+    b.r = (1 - t) * b.initialR + t * rFinal;
+  }
+
+  function tryFire(player) {
+    if (Date.now() < world.frozenUntil) return;
+    const sp = speedOf(player);
+    if (sp < params.minIndicatorSpeed) return;
+
+    const r = params.bulletRadius;
+    const nx = player.vx / sp, ny = player.vy / sp;
+    const spawnDist = player.r + r + 0.001;
+    const bx = player.x + nx * spawnDist;
+    const by = player.y + ny * spawnDist;
+    const bv = sp * params.bulletSpeedFactor;
+
+    const b = {
+      x: bx, y: by, vx: nx * bv, vy: ny * bv,
+      r, initialR: r, color: player.color, bounces: 0
+    };
+    updateBulletRadius(b);
+    world.bullets.push(b);
+  }
+
+  // ===== Physics =====
+  function applyInput(dt) {
+    if (Date.now() < world.frozenUntil) return;
+
+    let ax1=0, ay1=0, ax2=0, ay2=0;
+    if (keys.KeyW) ay1 -= 1; if (keys.KeyS) ay1 += 1; if (keys.KeyA) ax1 -= 1; if (keys.KeyD) ax1 += 1;
+    if (keys.ArrowUp) ay2 -= 1; if (keys.ArrowDown) ay2 += 1; if (keys.ArrowLeft) ax2 -= 1; if (keys.ArrowRight) ax2 += 1;
+
+    const n1 = (ax1||ay1)?1/Math.hypot(ax1,ay1):0;
+    const n2 = (ax2||ay2)?1/Math.hypot(ax2,ay2):0;
+
+    const T = params.thrust;
+    world.p1.vx += ax1*n1*T*dt; world.p1.vy += ay1*n1*T*dt;
+    world.p2.vx += ax2*n2*T*dt; world.p2.vy += ay2*n2*T*dt;
+  }
+
+  function integrateAndDamp(dt) {
+    const dampPlayers = Math.pow(params.damping, dt);
+    const dampBullets = Math.pow(params.bulletDamping, dt);
+
+    function clampVel(p){ const s=Math.hypot(p.vx,p.vy); if (s>params.maxSpeed){ const k=params.maxSpeed/s; p.vx*=k; p.vy*=k; } }
+    clampVel(world.p1); clampVel(world.p2);
+
+    // Damping first, then integrate
+    world.p1.vx*=dampPlayers; world.p1.vy*=dampPlayers;
+    world.p2.vx*=dampPlayers; world.p2.vy*=dampPlayers;
+
+    world.p1.x+=world.p1.vx*dt; world.p1.y+=world.p1.vy*dt;
+    world.p2.x+=world.p2.vx*dt; world.p2.y+=world.p2.vy*dt;
+
+    // Bullets: damp & integrate
+    for (const b of world.bullets) {
+      b.vx *= dampBullets; b.vy *= dampBullets;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+    }
+  }
+
+  function resolvePlayerCollision() {
+    for (let it=0; it<params.collisionIterations; it++) {
+      const a=world.p1, b=world.p2;
+      let dx=b.x-a.x, dy=b.y-a.y;
+      let dist=Math.hypot(dx,dy), min=a.r+b.r;
+      if (dist === 0){ b.x += 0.0001; b.y += 0.0001; dx=b.x-a.x; dy=b.y-a.y; dist=Math.hypot(dx,dy); }
+      if (dist < min){
+        const nx=dx/dist, ny=dy/dist, pen=min-dist, half=pen/2;
+        a.x -= nx*half; a.y -= ny*half; b.x += nx*half; b.y += ny*half;
+        const rvx=b.vx-a.vx, rvy=b.vy-a.vy, rvn=rvx*nx+rvy*ny;
+        if (rvn < 0){
+          const e=params.circleRestitution;
+          const j=-(1+e)*rvn/2, jx=j*nx, jy=j*ny;
+          a.vx -= jx; a.vy -= jy; b.vx += jx; b.vy += jy;
+          sfx.circle();
+        }
+      }
+    }
+  }
+
+  function handleWallsAndScoreOnce() {
+    const p1=world.p1, p2=world.p2, eW=params.wallRestitution;
+    // Top/bottom for both
+    for (const p of [p1,p2]) {
+      if (p.y - p.r <= -1){ p.y = -1 + p.r; p.vy = Math.abs(p.vy)*eW; sfx.wall(); }
+      else if (p.y + p.r >= 1){ p.y = 1 - p.r; p.vy = -Math.abs(p.vy)*eW; sfx.wall(); }
+    }
+    // Right bounce for P1 / left bounce for P2
+    if (p1.x + p1.r >= 1){ p1.x = 1 - p1.r; p1.vx = -Math.abs(p1.vx)*eW; sfx.wall(); }
+    if (p2.x - p2.r <= -1){ p2.x = -1 + p2.r; p2.vx = Math.abs(p2.vx)*eW; sfx.wall(); }
+
+    // Scoring (guard once)
+    if (!world.scoreLock) {
+      if (p1.x - p1.r <= -1) { // P2 scores
+        world.scoreLock = true;
+        world.score2 += 1;
+        updateScoreUI(); sfx.score();
+        beginFreezeOrWinCheck();
+      } else if (p2.x + p2.r >= 1) { // P1 scores
+        world.scoreLock = true;
+        world.score1 += 1;
+        updateScoreUI(); sfx.score();
+        beginFreezeOrWinCheck();
+      }
+    }
+  }
+
+  // Bullets vs walls
+  function bulletWalls() {
+    const e = params.bulletRestitution;
+    for (const b of world.bullets) {
+      let bounced = false;
+      if (b.x - b.r <= -1){ b.x = -1 + b.r; b.vx = Math.abs(b.vx)*e; bounced = true; }
+      else if (b.x + b.r >= 1){ b.x = 1 - b.r; b.vx = -Math.abs(b.vx)*e; bounced = true; }
+      if (b.y - b.r <= -1){ b.y = -1 + b.r; b.vy = Math.abs(b.vy)*e; bounced = true; }
+      else if (b.y + b.r >= 1){ b.y = 1 - b.r; b.vy = -Math.abs(b.vy)*e; bounced = true; }
+      if (bounced){ b.bounces++; updateBulletRadius(b); sfx.bulletWall(); }
+    }
+  }
+
+  // Generic elastic collision for two circles (refs by obj), with restitution e
+  function elasticCircleCollision(A, B, e, onBounce) {
+    const dx = B.x - A.x, dy = B.y - A.y;
+    const dist = Math.hypot(dx, dy);
+    const min = A.r + B.r;
+    if (dist === 0 || dist >= min) return false;
+
+    const nx = dx / dist, ny = dy / dist;
+    const pen = min - dist;
+    const half = pen / 2;
+    A.x -= nx * half; A.y -= ny * half;
+    B.x += nx * half; B.y += ny * half;
+
+    const rvx = B.vx - A.vx, rvy = B.vy - A.vy;
+    const rvn = rvx * nx + rvy * ny;
+    if (rvn < 0) {
+      const j = -(1 + e) * rvn / 2;
+      const jx = j * nx, jy = j * ny;
+      A.vx -= jx; A.vy -= jy;
+      B.vx += jx; B.vy += jy;
+      onBounce && onBounce();
+      return true;
+    }
+    return false;
+  }
+
+  function bulletsVsPlayers() {
+    const e = params.bulletRestitution;
+    for (const b of world.bullets) {
+      if (elasticCircleCollision(b, world.p1, e, () => { b.bounces++; updateBulletRadius(b); sfx.bulletCircle(); })) {}
+      if (elasticCircleCollision(b, world.p2, e, () => { b.bounces++; updateBulletRadius(b); sfx.bulletCircle(); })) {}
+    }
+  }
+
+  function bulletsVsBullets() {
+    const e = params.bulletRestitution;
+    const bs = world.bullets;
+    for (let i=0;i<bs.length;i++){
+      for (let j=i+1;j<bs.length;j++){
+        const bi = bs[i], bj = bs[j];
+        const bounced = elasticCircleCollision(bi, bj, e, null);
+        if (bounced) {
+          bi.bounces++; bj.bounces++;
+          updateBulletRadius(bi); updateBulletRadius(bj);
+          sfx.bulletBullet();
+        }
+      }
+    }
+  }
+
+  function purgeBullets() {
+    world.bullets = world.bullets.filter(b => b.bounces < params.bulletMaxBounces);
+  }
+
+  function beginFreezeOrWinCheck(){
+    if (world.score1 >= params.winScore || world.score2 >= params.winScore){
+      world.matchOver = true;
+      world.p1.vx=world.p1.vy=world.p2.vx=world.p2.vy=0;
+      const winner = (world.score1 > world.score2) ? 'Player 1' : 'Player 2';
+      showBanner(`${winner} Wins!`);
+      sfx.win();
+      return;
+    }
+    world.frozenUntil = Date.now() + params.freezeMsOnScore;
+    world.p1.vx=world.p1.vy=world.p2.vy=world.p2.vx=0;
+    setTimeout(()=>{ resetPositionsZeroVel(); }, params.freezeMsOnScore);
+  }
+
+  // ===== Render =====
+  function drawCircle(p){
+    const [sx,sy]=w2s(p.x,p.y), rr=r2s(p.r);
+    ctx.beginPath(); ctx.arc(sx,sy,rr,0,Math.PI*2); ctx.fillStyle=p.color; ctx.fill();
+  }
+  function drawIndicator(p){
+    const sp = speedOf(p);
+    if (sp < params.minIndicatorSpeed) return;
+    const rr = r2s(p.r);
+    const nx = p.vx / sp, ny = p.vy / sp;
+    const [cx, cy] = w2s(p.x, p.y);
+    const sx = cx + nx * rr;
+    const sy = cy + ny * rr;
+    const len = rr * 0.25;
+    const ex = sx - nx * len;
+    const ey = sy - ny * len;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.lineWidth = Math.max(2, rr * 0.08);
+    ctx.strokeStyle = '#eee';
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  }
+
+  function render(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    drawCircle(world.p1); drawCircle(world.p2);
+    drawIndicator(world.p1); drawIndicator(world.p2);
+    for (const b of world.bullets) drawCircle(b);
+  }
+
+  // ===== Loop =====
+  let lastT = performance.now();
+  function loop(now){
+    requestAnimationFrame(loop);
+    const dt = Math.min((now-lastT)/1000, 0.033); lastT = now;
+    if (!world.matchOver){
+      applyInput(dt);
+      if (Date.now() >= world.frozenUntil){
+        integrateAndDamp(dt);
+        resolvePlayerCollision();
+        handleWallsAndScoreOnce();
+
+        bulletWalls();
+        bulletsVsPlayers();
+        bulletsVsBullets();
+        purgeBullets();
+      }
+    }
+    render();
+  }
+  requestAnimationFrame(loop);
+
+  // Boot audio on first pointer
+  window.addEventListener('pointerdown', ()=>ensureAudio(), { once:true });
+
+  // Console hook
+  window.__edgepush = { world, params, reset: newMatch };
+})();
+</script>
+</body>
+</html>
