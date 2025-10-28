@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Klocka – Analog, Digital & Tidslinje</title>
+<style>
+  :root{
+    --bg:#0c0f12; --panel:#141a20; --ink:#e7ecf2; --muted:#9fb0c3;
+    --accent:#66c2ff; --accent-2:#ff6a8a; --good:#9be37a;
+    --tick:#3a4b5d; --major:#8fb6d8; --shadow:0 10px 30px rgba(0,0,0,.35); --radius:18px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+  .wrap{max-width:1100px;margin:0 auto;padding:clamp(12px,3vw,24px);display:flex;flex-direction:column;gap:clamp(12px,2.5vw,18px)}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .controls{display:flex;gap:8px;flex-wrap:wrap}
+  button{appearance:none;border:1px solid #2b3946;background:var(--panel);color:var(--ink);padding:10px 14px;border-radius:12px;cursor:pointer;box-shadow:var(--shadow);transition:transform .06s,background .2s,border-color .2s}
+  button:hover{transform:translateY(-1px);background:#18222b;border-color:#3a4b5d}
+  button:active{transform:translateY(0)}
+  .pill{border-radius:999px;padding:8px 12px;font-weight:600}
+  .row{display:grid;gap:clamp(12px,2.5vw,18px);grid-template-columns:1fr}
+  @media (min-width:860px){.row{grid-template-columns:1.1fr .9fr}}
+  .card{background:var(--panel);border:1px solid #1c252e;border-radius:var(--radius);box-shadow:var(--shadow);padding:clamp(12px,2.5vw,18px)}
+
+  /* Analog clock */
+  .clock{aspect-ratio:1/1;width:100%;max-width:560px;margin:0 auto}
+  svg{width:100%;height:100%;display:block}
+  .hand{stroke-linecap:round;filter:drop-shadow(0 1px 1px rgba(0,0,0,.6))}
+  .hand.second{stroke:var(--accent-2)}
+  .hand.minute,.hand.hour{stroke:var(--ink)}
+  .center-cap{fill:var(--ink);filter:drop-shadow(0 0 2px rgba(0,0,0,.6))}
+  .grab{cursor:grab}.grabbing{cursor:grabbing}
+
+  /* Digital */
+  .digital{display:flex;align-items:center;justify-content:center;gap:8px;font-variant-numeric:tabular-nums;user-select:none;flex-wrap:wrap}
+  .digits{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:16px;background:#0f141a;border:1px solid #1e2a35;box-shadow:var(--shadow)}
+  .digit{width:1ch;text-align:center;font-size:clamp(34px,6vw,48px);font-weight:700;line-height:1;padding:6px 2px;border-radius:8px;border:1px solid transparent;cursor:ns-resize;color:var(--ink)}
+  .digit.sep{cursor:default;width:auto;padding:0 2px;color:var(--muted);border:none}
+  .digit.active{border-color:#334657;background:#121b23}
+  .legend{display:flex;gap:12px;justify-content:center;color:var(--muted);font-size:13px}
+
+  /* Ruler */
+  .ruler{position:relative;height:230px;border-radius:var(--radius);overflow:hidden;border:1px solid #1b2631;background:linear-gradient(180deg,#0f141a,#0d1217)}
+  .ruler-top{position:absolute;inset:0 0 auto 0;height:40px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;color:var(--muted);font-size:13px;z-index:2;pointer-events:none}
+  .ruler-top .now{color:var(--good);font-weight:600}
+  canvas#rulerCanvas{position:absolute;inset:0;width:100%;height:100%}
+  .overlay-center{position:absolute;inset:auto 0 0 0;height:40px;pointer-events:none;background:linear-gradient(0deg,rgba(12,15,18,.75),rgba(12,15,18,0))}
+  .center-line{position:absolute;top:0;bottom:0;left:50%;width:2px;transform:translateX(-1px);background:linear-gradient(180deg,transparent,var(--accent),transparent);opacity:.65;pointer-events:none}
+  .note{color:var(--muted);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1 style="margin:0;font-size:clamp(18px,3.2vw,24px);font-weight:700;">Klocka</h1>
+      <div class="controls">
+        <button id="playPause" class="pill">⏸︎ Paus</button>
+        <button id="resetBtn" class="pill">↺ Återställ till aktuell tid</button>
+      </div>
+    </header>
+
+    <div class="row">
+      <section class="card">
+        <div class="clock" id="analog">
+          <svg viewBox="0 0 100 100" aria-label="Analog klocka">
+            <defs>
+              <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
+                <feDropShadow dx="0" dy="0.4" stdDeviation="0.7" flood-color="rgba(0,0,0,.6)"/>
+              </filter>
+            </defs>
+            <!-- Dial -->
+            <circle cx="50" cy="50" r="48" fill="#0c1319" stroke="#1c2a36" stroke-width="1.5"/>
+            <!-- All tick marks drawn in JS into this group -->
+            <g id="dialTicks"></g>
+            <!-- Hands -->
+            <g filter="url(#soft)">
+              <line id="hourHand" class="hand hour grab" x1="50" y1="50" x2="50" y2="30" stroke-width="2.7"/>
+              <line id="minuteHand" class="hand minute grab" x1="50" y1="50" x2="50" y2="16" stroke-width="2"/>
+              <line id="secondHand" class="hand second grab" x1="50" y1="52" x2="50" y2="12" stroke-width="1.2"/>
+              <circle class="center-cap" cx="50" cy="50" r="1.9"/>
+            </g>
+          </svg>
+        </div>
+
+        <div class="digital" style="margin-top:14px">
+          <div class="digits" id="digits" aria-label="Digital klocka redigerbar">
+            <span class="digit" data-step="36000000">0</span>
+            <span class="digit" data-step="3600000">0</span>
+            <span class="digit sep">:</span>
+            <span class="digit" data-step="600000">0</span>
+            <span class="digit" data-step="60000">0</span>
+            <span class="digit sep">:</span>
+            <span class="digit" data-step="10000">0</span>
+            <span class="digit" data-step="1000">0</span>
+          </div>
+        </div>
+        <div class="legend">
+          <span>⤴︎ Dra varje siffra upp/ner</span><span>—</span><span>⌚ Dra visarna</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="ruler" id="ruler">
+          <div class="ruler-top">
+            <div>Stockholmstid (sv-SE)</div>
+            <div class="now" id="readout">–</div>
+          </div>
+          <canvas id="rulerCanvas"></canvas>
+          <div class="center-line"></div>
+          <div class="overlay-center"></div>
+        </div>
+        <p class="note">Dra horisontellt för att panorera. Dra vertikalt för att zooma in/ut. ISO-veckor (svenska veckonummer, måndag först).</p>
+      </section>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ===== Locale & TZ =====
+  const TZ='Europe/Stockholm', LOCALE='sv-SE', TAU=Math.PI*2;
+  const fmtTime = new Intl.DateTimeFormat(LOCALE,{timeZone:TZ,hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  const fmtDate = new Intl.DateTimeFormat(LOCALE,{timeZone:TZ,weekday:'short',day:'2-digit',month:'short',year:'numeric'});
+  const monthFmt = new Intl.DateTimeFormat(LOCALE,{timeZone:TZ,month:'long',year:'numeric'});
+  const dayFmt = new Intl.DateTimeFormat(LOCALE,{timeZone:TZ,day:'2-digit',month:'2-digit'});
+  const hourFmt = new Intl.DateTimeFormat(LOCALE,{timeZone:TZ,hour:'2-digit',minute:'2-digit',hour12:false});
+
+  const nowMs = () => Date.now();
+
+  // ISO week number
+  function isoWeek(date){
+    const tmp=new Date(date.getTime());
+    const day=(tmp.getDay()+6)%7; // 0=Mon
+    tmp.setDate(tmp.getDate()-day+3);
+    const firstThursday=new Date(tmp.getFullYear(),0,4);
+    const dayDiff=(tmp-firstThursday)/86400000;
+    return 1+Math.floor(dayDiff/7);
+  }
+
+  // ===== State =====
+  const state={ timeMs:nowMs(), playing:true, lastFrameMs:nowMs(), pxPerMs:0.00015 };
+
+  // ===== Elements =====
+  const analogSvg=document.querySelector('#analog svg');
+  const dialTicks=document.getElementById('dialTicks');
+  const hourHand=document.getElementById('hourHand');
+  const minuteHand=document.getElementById('minuteHand');
+  const secondHand=document.getElementById('secondHand');
+  const digitsWrap=document.getElementById('digits');
+  const digitSpans=[...digitsWrap.querySelectorAll('.digit')].filter(d=>!d.classList.contains('sep'));
+  const readout=document.getElementById('readout');
+  const playPauseBtn=document.getElementById('playPause');
+  const resetBtn=document.getElementById('resetBtn');
+
+  const canvas=document.getElementById('rulerCanvas');
+  const ctx=canvas.getContext('2d');
+
+  // ===== Build ALL clock ticks in JS =====
+  (function buildDial(){
+    const g = dialTicks;
+    const add = (attrs)=>{ const el=document.createElementNS('http://www.w3.org/2000/svg','line'); Object.entries(attrs).forEach(([k,v])=>el.setAttribute(k,v)); g.appendChild(el); };
+    for(let i=0;i<60;i++){
+      const a=(i/60)*TAU - Math.PI/2;
+      const isMajor=i%5===0;
+      const rOuter=48, rInner=isMajor?42:45;
+      const x1=50 + rInner*Math.cos(a), y1=50 + rInner*Math.sin(a);
+      const x2=50 + rOuter*Math.cos(a), y2=50 + rOuter*Math.sin(a);
+      add({
+        x1:x1.toFixed(3), y1:y1.toFixed(3),
+        x2:x2.toFixed(3), y2:y2.toFixed(3),
+        stroke: isMajor? 'var(--major)' : 'var(--tick)',
+        'stroke-width': isMajor? '1.0' : '0.6',
+        'stroke-linecap':'round'
+      });
+    }
+  })();
+
+  // ===== Rendering helpers =====
+  function getParts(ms){
+    const parts=fmtTime.formatToParts(ms);
+    const n=t=>Number(t);
+    return {
+      hour:n(parts.find(p=>p.type==='hour').value),
+      minute:n(parts.find(p=>p.type==='minute').value),
+      second:n(parts.find(p=>p.type==='second').value),
+      msPart: ms%1000
+    };
+  }
+
+  function setHands(ms){
+    const {hour,minute,second,msPart}=getParts(ms);
+    const sFrac=second+msPart/1000;
+    const mFrac=minute+sFrac/60;
+    const hFrac=(hour%12)+mFrac/60;
+    const rot=(val,turns)=>`rotate(${(val/turns)*360} 50 50)`;
+    hourHand.setAttribute('transform',rot(hFrac,12));
+    minuteHand.setAttribute('transform',rot(mFrac,60));
+    secondHand.setAttribute('transform',rot(sFrac,60));
+  }
+
+  function setDigits(ms){
+    const parts=fmtTime.formatToParts(ms);
+    const h=parts.find(p=>p.type==='hour').value.padStart(2,'0');
+    const m=parts.find(p=>p.type==='minute').value.padStart(2,'0');
+    const s=parts.find(p=>p.type==='second').value.padStart(2,'0');
+    [...h+m+s].forEach((ch,i)=>digitSpans[i].textContent=ch);
+    readout.textContent=`${fmtDate.format(ms)} • ${fmtTime.format(ms)}`;
+  }
+
+  // ===== Canvas sizing =====
+  function resizeCanvas(){
+    const rect=canvas.getBoundingClientRect();
+    const dpr=Math.max(1,window.devicePixelRatio||1);
+    canvas.width=Math.floor(rect.width*dpr);
+    canvas.height=Math.floor(rect.height*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+
+  // ===== Ruler drawing =====
+  function niceStep(pxPerUnit){
+    const target=110;
+    const raw=target/pxPerUnit;
+    const pow=Math.pow(10,Math.floor(Math.log10(raw)));
+    const candidates=[1,2,5,10];
+    let best=candidates[0]*pow,bd=1e9;
+    for(const c of candidates){
+      const v=c*pow, d=Math.abs(v*pxPerUnit-target);
+      if(d<bd){best=v;bd=d;}
+    }
+    return best;
+  }
+
+  function drawRuler(msCenter){
+    const w=canvas.clientWidth, h=canvas.clientHeight;
+    ctx.clearRect(0,0,w,h);
+    ctx.fillStyle='#0c1218'; ctx.fillRect(0,0,w,h);
+
+    const pxPerMs=state.pxPerMs, originX=w/2, xAt=(ms)=>originX+(ms-msCenter)*pxPerMs;
+
+    const pxPerSec=pxPerMs*1000, pxPerMin=pxPerSec*60, pxPerHr=pxPerMin*60, pxPerDay=pxPerHr*24;
+
+    // label spacing guard
+    function labeler(minSpacing){
+      let last=-1e9;
+      return (x, draw)=>{ if(x-last>=minSpacing){ draw(); last=x; } };
+    }
+
+    function linearTicks(stepMs, yTop, yLine, labelFmt, colorTick, colorLabel, thickness=1, minLabelPx=70){
+      const left=msCenter-(w/2)/pxPerMs, right=msCenter+(w/2)/pxPerMs;
+      const first=Math.floor(left/stepMs)*stepMs; // align to step boundary both sides
+      const labelOk=labeler(minLabelPx);
+      ctx.save();
+      ctx.strokeStyle=colorTick; ctx.lineWidth=thickness; ctx.fillStyle=colorLabel;
+      for(let t=first; t<=right+stepMs; t+=stepMs){
+        const x=xAt(t);
+        ctx.beginPath(); ctx.moveTo(x,yTop); ctx.lineTo(x,yLine); ctx.stroke();
+        if(labelFmt){
+          const text=labelFmt(t);
+          ctx.font='12px system-ui,-apple-system,Segoe UI,Roboto';
+          const tw=ctx.measureText(text).width;
+          labelOk(x, ()=>{ ctx.textAlign='center'; ctx.textBaseline='top'; ctx.fillText(text,x, yLine+4); });
+        }
+      }
+      ctx.restore();
+    }
+
+    function drawWeeks(yTop,yLine){
+      const left=msCenter-(w/2)/pxPerMs, right=msCenter+(w/2)/pxPerMs;
+      const d=new Date(left); const dow=(d.getDay()+6)%7; d.setDate(d.getDate()-dow); d.setHours(0,0,0,0);
+      const ok=labeler(90);
+      for(let t=d.getTime(); t<right+7*86400000; t+=7*86400000){
+        const x=xAt(t);
+        ctx.strokeStyle='#44596f'; ctx.lineWidth=1.1;
+        ctx.beginPath(); ctx.moveTo(x,yTop); ctx.lineTo(x,yLine); ctx.stroke();
+        const wnum=isoWeek(new Date(t)).toString().padStart(2,'0');
+        ctx.fillStyle='#b7d3ec'; ctx.font='12px system-ui,-apple-system,Segoe UI,Roboto';
+        ok(x, ()=>{ ctx.textAlign='left'; ctx.textBaseline='top'; ctx.fillText(`v.${wnum}`, x+4, yLine+4); });
+      }
+    }
+
+    function drawMonths(yTop,yMid,yMajor){
+      const left=msCenter-(w/2)/pxPerMs, right=msCenter+(w/2)/pxPerMs;
+      ctx.save();
+      ctx.strokeStyle='#4a6176'; ctx.fillStyle='#cfe3f7'; ctx.lineWidth=1.2;
+      const ok=labeler(120);
+      let d=new Date(msCenter); d=new Date(d.getFullYear(), d.getMonth(), 1);
+      while(d.getTime()>left) d.setMonth(d.getMonth()-1);
+      while(d.getTime()<left) d.setMonth(d.getMonth()+1);
+
+      for(; d.getTime()<right+2*86400000; d.setMonth(d.getMonth()+1)){
+        const t=d.getTime(), x=xAt(t);
+        ctx.beginPath(); ctx.moveTo(x,yTop); ctx.lineTo(x,yMid); ctx.stroke();
+        ok(x, ()=>{ ctx.textAlign='left'; ctx.textBaseline='top'; ctx.fillText(monthFmt.format(d), x+4, yMid+4); });
+
+        if(d.getMonth()===0){
+          ctx.strokeStyle='#6fb1de'; ctx.lineWidth=1.6;
+          ctx.beginPath(); ctx.moveTo(x,yTop); ctx.lineTo(x,yMajor); ctx.stroke();
+          ctx.lineWidth=1.2; ctx.strokeStyle='#4a6176';
+          ctx.textAlign='left'; ctx.fillText(String(d.getFullYear()), x+4, yTop+4);
+        }
+      }
+      ctx.restore();
+    }
+
+    // lanes (from bottom to top) to reduce crowding
+    const laneSecTop = h-60, laneSecLine = h-40;
+    const laneMinTop = h-105, laneMinLine = h-85;
+    const laneHourTop= h-150, laneHourLine= h-130;
+    const laneDayTop = h-190, laneDayLine = h-170;
+    const laneWeekTop= h-214, laneWeekLine= h-196;
+    const laneMonthTop= 10,   laneMonthMid= 30, laneMonthMajor= 50;
+
+    // Visibility thresholds (tuned)
+    if(pxPerSec > 30){
+      const step = niceStep(pxPerSec) * 1000;
+      linearTicks(step, laneSecTop, laneSecLine, t=> new Date(t).toLocaleTimeString(LOCALE,{timeZone:TZ,hour12:false}), '#334657','#9fb0c3',1,80);
+    }
+    if(pxPerMin > 14){
+      const step = niceStep(pxPerMin) * 60000;
+      linearTicks(step, laneMinTop, laneMinLine, t=> hourFmt.format(t), '#3c5166','#b3c7db',1.2,90);
+    }
+    if(pxPerHr > 16){
+      const step = niceStep(pxPerHr) * 3600000;
+      linearTicks(step, laneHourTop, laneHourLine, t=> hourFmt.format(t), '#45627a','#c7def3',1.3,110);
+    }
+    if(pxPerDay > 18){
+      const step = niceStep(pxPerDay) * 86400000;
+      linearTicks(step, laneDayTop, laneDayLine, t=> dayFmt.format(t), '#517391','#dff1ff',1.6,120);
+      drawWeeks(laneWeekTop, laneWeekLine);
+    }
+    if(pxPerDay < 60){
+      drawMonths(laneMonthTop, laneMonthMid, laneMonthMajor);
+    }
+  }
+
+  function render(){ setHands(state.timeMs); setDigits(state.timeMs); drawRuler(state.timeMs); }
+
+  // ===== Loop =====
+  function tick(){
+    const t=nowMs(), dt=t-state.lastFrameMs; state.lastFrameMs=t;
+    if(state.playing) state.timeMs += dt;
+    render(); requestAnimationFrame(tick);
+  }
+
+  // ===== Controls =====
+  playPauseBtn.addEventListener('click', ()=>{ state.playing=!state.playing; playPauseBtn.textContent = state.playing ? '⏸︎ Paus' : '▶︎ Spela'; });
+  resetBtn.addEventListener('click', ()=>{ state.timeMs=nowMs(); state.playing=true; playPauseBtn.textContent='⏸︎ Paus'; });
+
+  // ===== Drag analog hands =====
+  function angleFromEvent(e, svgEl){
+    const r=svgEl.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2;
+    const x=(e.touches?e.touches[0].clientX:e.clientX)-cx;
+    const y=(e.touches?e.touches[0].clientY:e.clientY)-cy;
+    return Math.atan2(y,x);
+  }
+  function setupHandDrag(handEl, secondsPerTurn){
+    let dragging=false,last=0;
+    const start=(e)=>{ e.preventDefault(); dragging=true; handEl.classList.add('grabbing'); last=angleFromEvent(e,analogSvg); state.playing=false; playPauseBtn.textContent='▶︎ Spela'; };
+    const move=(e)=>{ if(!dragging) return; const a=angleFromEvent(e,analogSvg); let d=a-last; while(d>Math.PI) d-=TAU; while(d<-Math.PI) d+=TAU; state.timeMs += (d/TAU)*secondsPerTurn*1000; last=a; };
+    const end=()=>{ if(!dragging) return; dragging=false; handEl.classList.remove('grabbing'); };
+    handEl.addEventListener('mousedown',start); handEl.addEventListener('touchstart',start,{passive:false});
+    window.addEventListener('mousemove',move);  window.addEventListener('touchmove',move,{passive:false});
+    window.addEventListener('mouseup',end);     window.addEventListener('touchend',end);
+  }
+  setupHandDrag(secondHand,60);
+  setupHandDrag(minuteHand,3600);
+  setupHandDrag(hourHand,43200);
+
+  // ===== Drag per-digit digital =====
+  (function setupDigitDrag(){
+    let active=null,lastY=0,acc=0;
+    function start(e){
+      const t=e.target;
+      if(t.classList.contains('digit') && !t.classList.contains('sep')){
+        active=t; t.classList.add('active'); lastY=(e.touches?e.touches[0].clientY:e.clientY); acc=0;
+        state.playing=false; playPauseBtn.textContent='▶︎ Spela'; e.preventDefault();
+      }
+    }
+    function move(e){
+      if(!active) return; const y=(e.touches?e.touches[0].clientY:e.clientY), dy=lastY-y; lastY=y; acc+=dy;
+      const threshold=12, stepMs=Number(active.dataset.step);
+      while(acc>=threshold){ state.timeMs+=stepMs; acc-=threshold;}
+      while(acc<=-threshold){ state.timeMs-=stepMs; acc+=threshold;}
+    }
+    function end(){ if(!active) return; active.classList.remove('active'); active=null; }
+    digitsWrap.addEventListener('mousedown',start); digitsWrap.addEventListener('touchstart',start,{passive:false});
+    window.addEventListener('mousemove',move); window.addEventListener('touchmove',move,{passive:false});
+    window.addEventListener('mouseup',end); window.addEventListener('touchend',end);
+  })();
+
+  // ===== Ruler pan & zoom =====
+  (function setupRuler(){
+    const ruler=document.getElementById('ruler');
+    let dragging=false,lastX=0,lastY=0;
+    function down(e){ dragging=true; lastX=(e.touches?e.touches[0].clientX:e.clientX); lastY=(e.touches?e.touches[0].clientY:e.clientY); state.playing=false; playPauseBtn.textContent='▶︎ Spela'; }
+    function move(e){
+      if(!dragging) return;
+      const x=(e.touches?e.touches[0].clientX:e.clientX), y=(e.touches?e.touches[0].clientY:e.clientY);
+      const dx=x-lastX, dy=y-lastY; lastX=x; lastY=y;
+      state.timeMs -= dx / state.pxPerMs; // pan
+      if(dy!==0){ const factor=Math.exp(-dy*0.01); state.pxPerMs = Math.min(0.05, Math.max(1e-9, state.pxPerMs*factor)); } // zoom
+    }
+    function up(){ dragging=false; }
+    ruler.addEventListener('mousedown',down); ruler.addEventListener('touchstart',down,{passive:true});
+    window.addEventListener('mousemove',move); window.addEventListener('touchmove',move,{passive:true});
+    window.addEventListener('mouseup',up); window.addEventListener('touchend',up);
+    window.addEventListener('resize',resizeCanvas);
+  })();
+
+  // ===== Init =====
+  function init(){
+    resizeCanvas();
+    const w=canvas.clientWidth; state.pxPerMs = w / (6*3600000); // ~6h över bredden
+    state.timeMs=nowMs(); state.lastFrameMs=nowMs();
+    render(); requestAnimationFrame(tick);
+  }
+  init();
+})();
+</script>
+</body>
+</html>
