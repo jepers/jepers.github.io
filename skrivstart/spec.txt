@@ -1,0 +1,386 @@
+SPEC: Skrivstart (static webapp)
+SpecVersion: 1.2 — 2026-02-16 (deterministiskt serie-läge; seed + index)
+StorageSchemaVersion: 1
+
+============================================================
+0) FILES
+============================================================
+- index.html: Single-file app (HTML + CSS + plain JS).
+- sentences.txt: UTF-8, en mening per rad.
+  - Primärt "\n". Appen är robust mot "\r\n" genom att normalisera till "\n".
+  - Inga inbyggda radbrytningar i meningarna.
+
+============================================================
+1) GOAL
+============================================================
+Skrivstart är ett spel där användaren skriver av en målmening så snabbt som möjligt.
+Flera spelare kan få samma mening/serie utan server genom att dela:
+- samma sentences.txt (=> samma datasetId)
+- samma seedText (kod)
+- samma relevanta settings
+- samma serieposition (seriesIndex)
+
+Appen kör ENDAST deterministiskt serie-läge: varje runda använder nästa index i serien.
+
+============================================================
+2) DETERMINISM CONTRACT (måste vara identiskt mellan klienter)
+============================================================
+
+2.1 Dataset parsing (exakt)
+- text = await res.text()
+- text = text.replace(/\r\n/g, "\n")
+- text = text.trimEnd()
+- rawLines = text.split("\n")
+- sentences = rawLines.filter(line => line.length > 0)
+- Do NOT trim each line; keep exact chars (inkl. ledande/efterföljande spaces).
+
+2.2 datasetId (exakt)
+- datasetId = hex8(hash32("v1\n" + sentences.join("\n")))
+
+2.3 Längdregel (filter)
+- sentence.length = JS string.length (UTF-16 code units).
+
+2.4 Seed normalisering (UX, men deterministiskt)
+- seedNorm = seedText.trim()
+- seedNorm används för validering och seed-material.
+
+2.5 Relevanta settings för urval/serie
+- Endast: seedNorm, minLen, maxLen, seedSalt.
+- UI-only (t.ex. fontSizePx) får INTE påverka urval/serie.
+
+2.6 hash32 (exakt)
+- hash32 = FNV-1a 32-bit över UTF-8 bytes.
+- Outputformat: uint32.
+- hex8(u32) = 8 hex lowercase, leading zeros.
+- Alla interna 32-bitvärden behandlas som unsigned (>>> 0).
+
+2.7 PRNG (exakt): xorshift32
+State: uint32 x (seed).
+Step:
+- x ^= x << 13
+- x ^= x >>> 17
+- x ^= x << 5
+- return x >>> 0
+
+2.8 Valstrategi (ENDA tillåtna): Indexed reseed (Strategi B)
+För val vid serieindex i:
+- candidates = sentences.filter(s => minLen <= s.length && s.length <= maxLen)
+- seedMaterialBase =
+    datasetId + "|" +
+    String(minLen) + "|" +
+    String(maxLen) + "|" +
+    String(seedSalt) + "|" +
+    seedNorm
+- seedBase = hash32(seedMaterialBase)
+- seedI = hash32(hex8(seedBase) + "|" + String(i))
+- x = xorshift32(seedI)
+- idx = x % candidates.length
+- target = candidates[idx]
+
+Not: Numeric settings serialiseras via String(n) i base-10 utan extra whitespace.
+Not: Determinism kräver identisk parsing, identisk hash32, identisk PRNG, identisk strategi,
+     identiska relevanta settings och samma seriesIndex.
+
+============================================================
+3) APP MODEL (single source of truth)
+============================================================
+Global model (konceptuellt):
+- state: "loading" | "config" | "playing" | "result" | "error"
+- sentences: string[]                  (loaded from sentences.txt; empty lines removed)
+- datasetId: string                    (fingerprint derived from sentences content)
+- settings: object                     (see section 5)
+- ui: object                           (ephemeral UI state, warnings, candidateCount, etc.)
+- session: null | object               (current seed session state; see section 6)
+- run: null | object                   (current/last run data)
+- history: null | object               (loaded/saved to localStorage; see section 11)
+
+Principer:
+- Rendering driven by (state + model), no hidden DOM truth.
+- Settings controls byggs en gång och uppdateras via control.value/labels (inga DOM replacements i loop).
+- All tid tas från Date.now() (epoch ms); ingen global synk krävs i v1.2.
+
+============================================================
+4) LOADING + DATA
+============================================================
+On page load:
+1) state = "loading" (show spinner)
+2) fetch("./sentences.txt") (static hosting required; file:// won’t work reliably)
+3) Parse enligt 2.1 => sentences
+4) If fetch fails OR sentences.length === 0 => state="error"
+5) Compute datasetId enligt 2.2
+6) Load history from localStorage (see section 11), keyed per datasetId.
+   - If found: restore settingsSnapshot values into current settings values.
+   - If found: restore sessionSnapshot.seedText into settings.seedText
+   - If found: restore sessionSnapshot.seriesIndex
+7) Seed default on load if no stored seedText:
+   - Generate random human-friendly code and set settings.seedText.
+   - Recommended: 6–8 chars from Crockford Base32 (no I/L/O/U) or hex.
+   - Randomness source: crypto.getRandomValues.
+8) Init session from settings:
+   - seedNorm = settings.seedText.trim()
+   - seedBase derived per section 2.8 (requires minLen/maxLen/seedSalt)
+   - seriesIndex from storage or 0
+9) state = "config" when ready.
+
+============================================================
+5) SETTINGS SYSTEM (data-driven + UI exposure)
+============================================================
+All settings live in one object with metadata describing UI control type and exposure.
+Exposed (ui:true): seedText, minLen, maxLen, fontSizePx
+Hidden (ui:false): seedSalt, historyLimit
+
+Requirements:
+- UI autogenererar controls för ui:true settings.
+- seedText input uppdaterar settings-objektet direkt via events.
+- Settings UI byggs en gång; uppdateras genom att ändra control.value/labels.
+- I playing/result ska settings vara disabled (låsta) för determinism.
+
+Validation in config:
+- Enforce minLen <= maxLen (auto-correct via swap/clamp).
+- Enforce seedNorm.length >= 4 (seedNorm = seedText.trim()).
+  - If invalid: show inline warning and disable “Start”.
+- Candidate filtering check:
+  - candidates = filter per 2.8
+  - If candidates.length === 0: show "Inga meningar matchar filtret." and disable “Start”.
+
+Defaults (editable):
+- seedText: generated random on load (if not restored)
+- seedMinLen: 4
+- minLen: 10
+- maxLen: 200
+- fontSizePx: 36
+- seedSalt: 0
+- historyLimit: 500
+- maxDurationMs: 600000 (10 min)
+- CPM_CAP: 2000
+
+============================================================
+6) SERIES MODE + SESSION RULES (låsta)
+============================================================
+Terminologi:
+- seriesIndex: heltal >= 0 som anger vilket steg i serien som väljs.
+- session: { seedText, seedNorm, seedBase, seriesIndex }
+
+Series index rules (EXAKT):
+- On “Start”: använd current session.seriesIndex (muterar inte direkt).
+- After a completed run (status ok OR timeout): session.seriesIndex = session.seriesIndex + 1
+- On “Avbryt” under playing: return to config; do NOT record run; do NOT change seriesIndex.
+
+Config actions:
+- “Nollställ serie” => seriesIndex = 0
+- “Ny slumpad kod” => generate new seedText; set seriesIndex = 0
+
+Target selection:
+- target = select(session.seriesIndex) per section 2.8.
+
+============================================================
+7) GAMEPLAY STATES + UI
+============================================================
+Global layout principle:
+- UI vertikalt staplad uppifrån och nedåt; horisontellt centrerad.
+- Textblock kan vara responsivt breda men centrerade.
+
+Visual constants:
+- body background: #444
+- target remaining color: #abc
+- correct prefix color: #6c8
+- Minimum horizontal padding for text area: 50px left/right
+- Center align text lines if wrapping
+- font size driven by setting fontSizePx for both target and input
+
+Whitespace visualization (display-only):
+- Render SPACE " " as "·" i både målmeningen (target display) och användarens input (overlay display).
+- Comparison uses raw strings (no trimming); whitespace counts.
+
+Prefix logic:
+- Let target string T, typed string U (textarea.value).
+- Let k = length of longest common prefix of T and U.
+- Target render: T[0..k) green, T[k..end) #abc
+- Input overlay render:
+  - U[0..k) green
+  - U[k..end) normal input color (e.g. #eee)
+  - Render spaces as "·" in the overlay.
+
+Input component ("single representation"):
+- Baseline: <textarea> för faktisk input + overlay <div> för visning.
+  - textarea sits above overlay with transparent text but visible caret (caret-color).
+  - Sync scroll positions (scrollTop/scrollLeft) from textarea to overlay.
+  - overlay is aria-hidden=true.
+- Fallback allowed if overlay fails:
+  - show normal textarea text (no dot/prefix in input), but keep target coloring.
+
+Paste & drop:
+- Prevent default on paste.
+- Prevent default on drop.
+- Copy/cut/backspace är tillåtet.
+
+Timing:
+- startAtMs = Date.now() when entering playing.
+- elapsed = Date.now() - startAtMs.
+- Stop when typed === target (exact match).
+- maxDurationMs = 10 * 60 * 1000.
+  - If elapsed >= maxDurationMs: end run as timeout => go to result.
+  - On timeout: disable textarea (no further input).
+
+States:
+
+A) state="config"
+- SeedText ("Kod") input + helper: "Dela koden med andra för samma mening/serie."
+- Serie-info: "Serieposition: i" (current seriesIndex)
+- Buttons:
+  - "Start" (enabled iff seed valid + min/max valid + candidates>0)
+  - "Nollställ serie"
+  - "Ny slumpad kod"
+- Settings UI (exposed: minLen, maxLen, fontSizePx; seedText already shown)
+- Inline warnings under settings.
+
+B) state="playing"
+- Target display (wrapped, centered, prefix coloring, spaces shown as "·").
+- Input overlay+textarea (visually one field), font size matches target.
+- Optional live info: mistakes, elapsed
+- Controls:
+  - Small “Avbryt” (return to config immediately; do NOT record run; do NOT change seriesIndex)
+
+C) state="result"
+- Target view frozen.
+- Time: "MM:SS.mmm"
+- Stats:
+  - CPM (rounded integer)
+  - Mistakes
+  - Status: "OK" or "Timeout"
+- Buttons:
+  - "Okej" (returns to config)
+  - Optional: "Nästa" (starts next round immediately; seriesIndex has already been incremented after completion)
+
+D) state="error"
+- Show error message and optional "Försök igen" (reload).
+
+============================================================
+8) MISTAKE COUNTING (felskrivningar)
+============================================================
+Maintain mistakes counter in current run.
+On each input change:
+- newTyped = textarea.value
+- If (newTyped.length !== previousTyped.length) AND NOT target.startsWith(newTyped):
+    mistakes++
+- previousTyped = newTyped
+
+Note:
+- We only count deviation on length-changing edits (insert/delete/cut).
+- Same-length replacements do not increment.
+- This counts deviation events, not edit distance.
+
+============================================================
+9) RESULT METRICS
+============================================================
+Duration:
+- durationMs = endMs - startAtMs
+- Display formatted as MM:SS.mmm (leading zeros).
+
+CPM:
+- chars = target.length
+- minutes = durationMs / 60000
+- cpm = chars / minutes
+- Display as integer (rounded).
+
+Mistakes:
+- As defined in section 8.
+
+Extensibility:
+- Stats defined as list of calculators:
+  - { id, label, compute(run), format(value) }
+
+============================================================
+10) HISTORY + PROGRESS UI (bottom; scroll)
+============================================================
+Placement:
+- History section is below the main game UI and may require scrolling.
+- "Okej" (and optional "Nästa") is always directly under the current run’s result stats.
+
+Content:
+- Title: "Historik"
+- Summary:
+  - Total runs
+  - Best CPM
+  - Median senaste 10
+- Graph: CPM over time (simple line chart)
+  - Render using <canvas> (no external libraries).
+  - X-axis: run index.
+  - Y-axis: CPM.
+  - Show last N points (e.g. 100) with auto-scaling.
+  - Outlier-capping: yMax = min(maxCPMInWindow, CPM_CAP)
+- List/table of recent runs (descending):
+  - Date/time, duration, CPM, mistakes, target length, status
+  - Also show seriesIndex and short seed label (e.g. first 6 chars of seedNorm) to reproduce.
+
+============================================================
+11) LOCALSTORAGE PERSISTENCE (per dataset)
+============================================================
+Key:
+- "skrivstart.v1." + datasetId
+
+Stored structure:
+{
+  version: 1,
+  datasetId: "...",
+  settingsSnapshot: {
+    seedText: string,
+    minLen: number,
+    maxLen: number,
+    fontSizePx: number,
+    seedSalt: number,
+    historyLimit: number
+  },
+  sessionSnapshot: {
+    seedText: string,
+    seriesIndex: number
+  },
+  runs: [
+    {
+      id: string,
+      playedAtMs: number,
+      startAtMs: number,
+
+      seriesIndex: number,     // the index used for selection
+      seedText: string,        // store seedNorm (recommended) and be consistent
+      seedSalt: number,
+
+      minLen: number,
+      maxLen: number,
+      fontSizePx: number,
+
+      target: string,
+      durationMs: number,
+      cpm: number,
+      mistakes: number,
+      status: "ok" | "timeout"
+    }
+  ]
+}
+
+Not stored:
+- typed text (explicitly excluded in v1.x).
+
+Retention:
+- Keep at most historyLimit runs (default 500). Trim oldest when exceeding.
+
+Restore:
+- On load, if localStorage exists for datasetId, restore settingsSnapshot and sessionSnapshot.
+- Always restore seedText if present (no "user wants persistence" condition).
+
+============================================================
+12) CSS + ACCESSIBILITY
+============================================================
+- Background #444.
+- Sufficient contrast for UI text.
+- Keyboard accessible controls.
+- Focus management:
+  - On entering playing: focus textarea.
+  - On result: focus "Okej".
+- Responsive layout and wrapping for long sentences.
+- textarea:
+  - autocomplete="off", autocapitalize="off", spellcheck="false"
+- Overlay:
+  - textarea is the actual input element; overlay is aria-hidden=true.
+
+END SPEC

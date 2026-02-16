@@ -1,0 +1,818 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WCSim (static)</title>
+  <style>
+    :root{
+      --bg: #0b0f14;
+      --panel: #0f1620;
+      --panel2: #0c121a;
+      --text: #d7e0ea;
+      --muted: #9aa8b6;
+      --border: rgba(255,255,255,.08);
+      --border2: rgba(255,255,255,.12);
+      --accent: #7aa2ff;
+      --danger: #ff6b6b;
+      --good: #3ddc97;
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+    }
+
+    *{ box-sizing: border-box; }
+    html, body { height: 100%; }
+    body{
+      margin:0;
+      font-family: var(--sans);
+      color: var(--text);
+      background: radial-gradient(1200px 800px at 20% -10%, rgba(122,162,255,.18), transparent 60%),
+                  radial-gradient(900px 600px at 90% 10%, rgba(61,220,151,.10), transparent 55%),
+                  var(--bg);
+      overflow: hidden;
+    }
+
+    .app{
+      height: 100%;
+      display:flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .topbar{
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      padding: 10px 10px;
+      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+    }
+
+    .title{
+      display:flex;
+      flex-direction: column;
+      gap: 2px;
+      margin-right: auto;
+      padding-left: 4px;
+      user-select:none;
+    }
+    .title strong{ font-weight: 650; letter-spacing:.2px; }
+    .title span{ color: var(--muted); font-size: 12px; }
+
+    button{
+      appearance: none;
+      border: 1px solid var(--border2);
+      background: rgba(255,255,255,.05);
+      color: var(--text);
+      padding: 9px 12px;
+      border-radius: 12px;
+      cursor:pointer;
+      font-weight: 600;
+      letter-spacing:.2px;
+      transition: transform .06s ease, background .15s ease, border-color .15s ease;
+      user-select:none;
+    }
+    button:hover{ background: rgba(255,255,255,.08); border-color: rgba(122,162,255,.35); }
+    button:active{ transform: translateY(1px); }
+    button:focus{ outline: 2px solid rgba(122,162,255,.35); outline-offset: 2px; }
+
+    .btn-primary{ border-color: rgba(122,162,255,.45); background: rgba(122,162,255,.10); }
+    .btn-primary:hover{ background: rgba(122,162,255,.16); }
+    .btn-danger{ border-color: rgba(255,107,107,.45); background: rgba(255,107,107,.10); }
+    .btn-danger:hover{ background: rgba(255,107,107,.16); }
+
+    .status{
+      margin-left: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      user-select:none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 45vw;
+    }
+
+    .main{
+      flex:1;
+      min-height: 0;
+      display:flex;
+      gap: 0;
+      border-radius: 16px;
+      overflow:hidden;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      box-shadow: var(--shadow);
+    }
+
+    .pane{
+      min-width: 180px;
+      display:flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .pane-header{
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+    }
+    .pane-header .label{
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing:.3px;
+      text-transform: uppercase;
+      user-select:none;
+    }
+    .pane-header .hint{
+      font-size: 12px;
+      color: rgba(215,224,234,.65);
+      user-select:none;
+    }
+
+    textarea{
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      resize: none;
+      border: none;
+      outline: none;
+      padding: 12px;
+      background: var(--panel);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.35;
+      white-space: pre;
+      overflow: auto;
+      spellcheck: false;
+    }
+    textarea::selection{ background: rgba(122,162,255,.28); }
+
+    .output{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      padding: 12px;
+      background: var(--panel2);
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.35;
+      white-space: pre;
+      margin: 0;
+    }
+
+    .divider{
+      width: 10px;
+      cursor: col-resize;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent);
+      position: relative;
+      flex: 0 0 10px;
+    }
+    .divider::after{
+      content:"";
+      position:absolute;
+      top: 10px;
+      bottom: 10px;
+      left: 50%;
+      width: 2px;
+      transform: translateX(-50%);
+      border-radius: 2px;
+      background: rgba(255,255,255,.16);
+    }
+    .divider.dragging{ background: rgba(122,162,255,.10); }
+    .divider.dragging::after{ background: rgba(122,162,255,.60); }
+
+    .kbd{
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 2px 6px;
+      border: 1px solid var(--border2);
+      border-bottom-color: rgba(255,255,255,.18);
+      border-radius: 8px;
+      background: rgba(255,255,255,.04);
+      color: rgba(215,224,234,.85);
+      user-select:none;
+    }
+
+    @media (max-width: 900px){
+      body{ overflow:auto; }
+      .app{ height: auto; min-height: 100%; }
+      .main{ height: 72vh; }
+      .status{ max-width: 35vw; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="topbar">
+      <div class="title">
+        <strong>WCSim</strong>
+        <span>Static webapp · teams i localStorage · output i högerpanel</span>
+      </div>
+
+      <button id="btnSim" class="btn-primary">Simulate</button>
+      <button id="btnPrint">Print teams</button>
+      <button id="btnLoad">Load teams</button>
+      <button id="btnClear" class="btn-danger">Clear output</button>
+
+      <div id="status" class="status">Redo.</div>
+    </div>
+
+    <div class="main" id="main">
+      <div class="pane" id="leftPane" style="flex: 0 0 52%;">
+        <div class="pane-header">
+          <div class="label">Teams input</div>
+          <div class="hint">Tips: <span class="kbd">Ctrl</span>+<span class="kbd">S</span> sparar</div>
+        </div>
+        <textarea id="teamsInput" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off"></textarea>
+      </div>
+
+      <div class="divider" id="divider" aria-label="Resize divider" title="Dra för att ändra bredd"></div>
+
+      <div class="pane" id="rightPane" style="flex: 1 1 auto;">
+        <div class="pane-header">
+          <div class="label">Output</div>
+          <div class="hint">Tips: <span class="kbd">Ctrl</span>+<span class="kbd">L</span> load · <span class="kbd">Ctrl</span>+<span class="kbd">Enter</span> simulate</div>
+        </div>
+        <pre id="output" class="output"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --------------------------
+    // Persistence + UI helpers
+    // --------------------------
+    const LS_TEAMS = "wcsim.teamsText.v1";
+    const LS_SPLIT = "wcsim.splitPct.v1";
+
+    const elTeams = document.getElementById("teamsInput");
+    const elOut = document.getElementById("output");
+    const elStatus = document.getElementById("status");
+
+    function setStatus(msg) {
+      elStatus.textContent = msg;
+    }
+
+    function appendOut(line = "") {
+      elOut.textContent += line + "\n";
+      // autoscroll till botten
+      elOut.scrollTop = elOut.scrollHeight;
+    }
+
+    function clearOut() {
+      elOut.textContent = "";
+    }
+
+    function saveTeamsText() {
+      localStorage.setItem(LS_TEAMS, elTeams.value);
+      setStatus("Sparat teams till localStorage.");
+    }
+
+    function loadTeamsTextIntoTextarea() {
+      const v = localStorage.getItem(LS_TEAMS);
+      if (v != null && v.trim().length) {
+        elTeams.value = v;
+        setStatus("Laddade teams från localStorage.");
+      } else {
+        elTeams.value = defaultTeamsAsString.trimEnd() + "\n";
+        setStatus("Ingen localStorage-data, laddade default teams.");
+      }
+    }
+
+    // Spara när användaren skriver (debounce)
+    let saveTimer = null;
+    elTeams.addEventListener("input", () => {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        localStorage.setItem(LS_TEAMS, elTeams.value);
+        setStatus("Autosparat.");
+      }, 250);
+    });
+
+    // --------------------------
+    // Split divider drag
+    // --------------------------
+    const divider = document.getElementById("divider");
+    const main = document.getElementById("main");
+    const leftPane = document.getElementById("leftPane");
+
+    function applySplitPct(pct) {
+      const clamped = Math.max(20, Math.min(80, pct));
+      leftPane.style.flex = `0 0 ${clamped}%`;
+      localStorage.setItem(LS_SPLIT, String(clamped));
+    }
+
+    (function initSplit() {
+      const saved = parseFloat(localStorage.getItem(LS_SPLIT) || "");
+      if (Number.isFinite(saved)) applySplitPct(saved);
+    })();
+
+    let dragging = false;
+
+    function onMove(clientX) {
+      const rect = main.getBoundingClientRect();
+      const x = Math.max(rect.left, Math.min(rect.right, clientX));
+      const pct = ((x - rect.left) / rect.width) * 100;
+      applySplitPct(pct);
+    }
+
+    divider.addEventListener("mousedown", (e) => {
+      dragging = true;
+      divider.classList.add("dragging");
+      document.body.style.userSelect = "none";
+      onMove(e.clientX);
+    });
+
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      onMove(e.clientX);
+    });
+
+    window.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      divider.classList.remove("dragging");
+      document.body.style.userSelect = "";
+      setStatus("Ändrade split.");
+    });
+
+    // Touch support
+    divider.addEventListener("touchstart", (e) => {
+      dragging = true;
+      divider.classList.add("dragging");
+      onMove(e.touches[0].clientX);
+      e.preventDefault();
+    }, { passive: false });
+
+    window.addEventListener("touchmove", (e) => {
+      if (!dragging) return;
+      onMove(e.touches[0].clientX);
+      e.preventDefault();
+    }, { passive: false });
+
+    window.addEventListener("touchend", () => {
+      if (!dragging) return;
+      dragging = false;
+      divider.classList.remove("dragging");
+      setStatus("Ändrade split.");
+    });
+
+    // --------------------------
+    // Model
+    // --------------------------
+    class Player {
+      constructor(name, defense, attack) {
+        this.name = name;
+        this.defense = defense;
+        this.attack = attack;
+        this.goals = 0;
+        this.interceptions = 0;
+      }
+    }
+
+    class Team {
+      constructor(name, players) {
+        this.name = name;
+        this.players = players;
+        this.score = 0;
+        this.points = 0;
+      }
+      randomPlayer() {
+        return this.players[Math.floor(Math.random() * this.players.length)];
+      }
+    }
+
+    // --------------------------
+    // String helpers (Swift-like)
+    // --------------------------
+    function padRight(str, len) {
+      const s = String(str);
+      if (s.length >= len) return s;
+      return s + " ".repeat(len - s.length);
+    }
+
+    function isDigitsOnly(s) {
+      return /^[0-9]+$/.test(s);
+    }
+
+    // --------------------------
+    // Parsing teams input
+    // Format:
+    // --
+    // TeamName
+    //   Player ; defense ; attack
+    // (5 players)
+    // repeated...
+    // --------------------------
+    function parseTeamsFromText(text) {
+      const lines = text
+        .split("\n")
+        .map(l => l.trim())
+        .filter(l => l.length > 0);
+
+      const teams = [];
+      let i = 0;
+
+      function fail(msg) {
+        throw new Error(msg + ` (vid radindex ${i})`);
+      }
+
+      while (i < lines.length) {
+        const dash = lines[i++];
+        if (dash !== "--") fail(`Förväntade "--" men fick "${dash}"`);
+
+        const teamName = lines[i++];
+        if (!teamName || teamName.includes(";")) fail(`Ogiltigt lagnamn "${teamName}"`);
+
+        const players = [];
+        for (let k = 0; k < 5; k++) {
+          const pl = lines[i++];
+          if (pl == null) fail(`Saknar spelarrad för laget "${teamName}"`);
+          // Förvänta "Name ; d ; a" (med semikolon), tillåt valfria spaces runt ;
+          const parts = pl.split(";").map(p => p.trim());
+          if (parts.length !== 3) fail(`Ogiltig spelarrad "${pl}"`);
+          const [name, defS, attS] = parts;
+          if (!name || !defS || !attS) fail(`Tomt fält i "${pl}"`);
+          if (!isDigitsOnly(defS) || !isDigitsOnly(attS)) fail(`Defense/attack måste vara siffror i "${pl}"`);
+          const defense = parseInt(defS, 10);
+          const attack = parseInt(attS, 10);
+          players.push(new Player(name, defense, attack));
+        }
+
+        teams.push(new Team(teamName, players));
+      }
+
+      return teams;
+    }
+
+    // --------------------------
+    // WCSim functions
+    // --------------------------
+    const WCSim = {
+      printTeams(teams) {
+        for (const team of teams) {
+          appendOut("--");
+          appendOut(team.name);
+          for (const p of team.players) {
+            appendOut(`  ${p.name} ; ${p.defense} ; ${p.attack}`);
+          }
+        }
+      },
+
+      simulateGroupPlay(teams) {
+        // Round-robin i gruppen (alla möter alla, båda riktningar, precis som Swift-koden)
+        for (let i = 0; i < teams.length; i++) {
+          for (let j = 0; j < teams.length; j++) {
+            if (i === j) continue;
+            const teamA = teams[i];
+            const teamB = teams[j];
+            this.simulateMatch(teamA, teamB);
+          }
+        }
+
+        const allPlayers = teams.flatMap(t => t.players);
+
+        appendOut("");
+        appendOut("-------- Top Scorers:");
+        for (const p of [...allPlayers].sort((a,b) => b.goals - a.goals)) {
+          appendOut(`${padRight(p.name, 20)} ${p.goals}`);
+        }
+
+        appendOut("");
+        appendOut("-------- Top Defenders:");
+        for (const p of [...allPlayers].sort((a,b) => b.interceptions - a.interceptions)) {
+          appendOut(`${padRight(p.name, 20)} ${p.interceptions}`);
+        }
+
+        appendOut("");
+        appendOut("-------- Team Points");
+        for (const t of [...teams].sort((a,b) => b.points - a.points)) {
+          appendOut(`${padRight(t.name, 20)} ${t.points}`);
+        }
+      },
+
+      simulateMatch(teamAIn, teamBIn) {
+        appendOut("----");
+        const npc = Math.max(teamAIn.name.length, teamBIn.name.length) + 1;
+
+        // Skriv ut på samma sätt som Swift: två rader sA/sB som byggs upp med händelser.
+        let sA = padRight(teamAIn.name, npc) + "0";
+        let sB = padRight(teamBIn.name, npc) + "0";
+
+        // Vi vill mutera poäng/goals/interceptions på originalobjekten (precis som Swift-klasser).
+        // Men lokalt växlar vi "perspektiv" genom att swappa referenser.
+        let teamA = teamAIn;
+        let teamB = teamBIn;
+
+        teamA.score = 0;
+        teamB.score = 0;
+
+        const rounds = 6;
+        if (rounds % 2 !== 0) throw new Error("rounds måste vara multipel av 2");
+
+        function pickAttacker(t) {
+          while (true) {
+            const a = t.randomPlayer();
+            const roll = Math.floor(Math.random() * 101); // 0..100
+            if (roll <= a.attack) return a;
+          }
+        }
+
+        function pickDefender(t) {
+          while (true) {
+            const d = t.randomPlayer();
+            const roll = Math.floor(Math.random() * 101); // 0..100
+            if (roll <= d.defense) return d;
+          }
+        }
+
+        for (let i = 0; i < rounds; i++) {
+          const attacker = pickAttacker(teamA);
+          const defender = pickDefender(teamB);
+
+          if (attacker.attack > defender.defense) {
+            attacker.goals += 1;
+            teamA.score += 1;
+
+            const nl = attacker.name.length;
+            const a = attacker.name + " " + padRight(String(teamA.score), 2);
+            const b = " ".repeat(nl) + " " + padRight(String(teamB.score), 2);
+
+            if (i % 2 === 0) {
+              sA += "  " + a;
+              sB += "  " + b;
+            } else {
+              sA += "  " + b;
+              sB += "  " + a;
+            }
+          } else {
+            defender.interceptions += 1;
+          }
+
+          // Swap teamA/teamB (precis som Swift)
+          const tmp = teamA;
+          teamA = teamB;
+          teamB = tmp;
+        }
+
+        // OBS: Swift-koden räknar points EFTER loopen på teamA/teamB i dess aktuella swap-läge.
+        // Det är lite "knepigt" men vi speglar exakt.
+        if (teamA.score > teamB.score) {
+          teamA.points += 3;
+        } else if (teamB.score > teamA.score) {
+          teamB.points += 3;
+        } else {
+          teamA.points += 1;
+          teamB.points += 1;
+        }
+
+        appendOut(`${sA}  | points: ${teamA.points}`);
+        appendOut(`${sB}  | points: ${teamB.points}`);
+        appendOut("");
+      }
+    };
+
+    // --------------------------
+    // Default teams (från Swift-strängen)
+    // --------------------------
+    const defaultTeamsAsString = `
+--
+Spain
+  Cubarsi ; 86 ; 37
+  Cucurella ; 84 ; 53
+  Pedri ; 70 ; 87
+  Olmo ; 59 ; 85
+  Yamal ; 39 ; 89
+--
+France
+  Saliba ; 88 ; 39
+  Koundé ; 87 ; 62
+  Tchouameni ; 86 ; 69
+  Mbappé ; 38 ; 88
+  Dembelé ; 40 ; 88
+--
+England
+  A. Arnold ; 85 ; 69
+  Rice ; 85 ; 85
+  Bellingham ; 70 ; 86
+  Palmer ; 60 ; 86
+  Kane ; 39 ; 87
+--
+Germany
+  Rüdiger ; 85 ; 69
+  Kimmich ; 86 ; 69
+  Wirz ; 60 ; 87
+  Musiala ; 60 ; 86
+  Havertz ; 42 ; 83
+--
+Portugal
+  N. Mendes ; 86 ; 80
+  J. Neves ; 84 ; 82
+  Vitinha ; 65 ; 87
+  B. Fernandes ; 64 ; 85
+  Ronaldo ; 38 ; 84
+--
+Netherlands
+  Van Dijk ; 87 ; 39
+  Frimpong ; 85 ; 68
+  Dumfries ; 84 ; 79
+  F. de Jong ; 85 ; 75
+  Gakpo ; 42 ; 84
+--
+Italy
+  Bastoni ; 87 ; 39
+  Dimarco ; 84 ; 77
+  Barella ; 85 ; 84
+  Locatelli ; 83 ; 50
+  Politano ; 39 ; 83
+--
+Belgium
+  Theate ; 81 ; 38
+  Tielemans ; 74 ; 79
+  de Ketelare ; 67 ; 79
+  Doku ; 39 ; 83
+  Openda ; 39 ; 81
+--
+Croatia
+  Stanisic ; 82 ; 39
+  Gvardiol ; 84 ; 45
+  Kovacic ; 82 ; 56
+  Modric ; 68 ; 83
+  Perisic ; 40 ; 79
+--
+Denmark
+  A. Christiensen ; 83 ; 39
+  Norgard ; 82 ; 62
+  Hjulmanland ; 79 ; 63
+  Dorgu ; 79 ; 69
+  Hojlund ; 39 ; 81
+--
+Sweden
+  Hien ; 70 ; 39
+  L.Bergvall ; 60 ; 79
+  Elanga ; 39 ; 87
+  Gyökares ; 39 ; 87
+  Isak ; 38 ; 87
+--
+Norway
+  Ajer ; 70 ; 42
+  Odegaard ; 69 ; 86
+  Nusa ; 50 ; 79
+  Sorloth ; 39 ; 82
+  Haaland ; 39 ; 88
+--
+Poland
+  Kiwior ; 78 ; 39
+  M. Cash ; 77 ; 40
+  P. Zielenski ; 80 ; 69
+  Zalewski ; 58 ; 79
+  Lewandowski ; 39 ; 86
+--
+Ukraine
+  Zabarnyj ; 79 ; 39
+  Zinchenko ; 78 ; 59
+  Mykolenko ; 74 ; 49
+  Yarmblink ; 70 ; 50
+  Dovbyk ; 37 ; 70
+--
+Scotland
+  A. Robertson ; 83 ; 69
+  Tavernier ; 77 ; 76
+  S.McTominay ; 80 ; 83
+  B. Gilmour ; 80 ; 71
+  Boak ; 39 ; 76
+--
+Turkey
+  Kadiouglu ; 72 ; 68
+  Calhanoglu ; 83 ; 70
+  Guler ; 58 ; 81
+  Yildiz ; 39 ; 81
+  Akturoglu ; 39 ; 79
+--
+Austria
+  Alaba ; 84 ; 40
+  Laimer ; 79 ; 74
+  Sabitzer ; 78 ; 79
+  Baumgartner ; 41 ; 80
+  Wurmbrand ; 39 ; 72
+--
+Slovenia
+  Bijol ; 69 ; 40
+  Stankovic ; 73 ; 40
+  Lovric ; 70 ; 71
+  Sesko ; 40 ; 81
+  Viptonik ; 38 ; 69
+`.trim();
+
+    // --------------------------
+    // Current teams state
+    // --------------------------
+    let currentTeams = [];
+
+    function loadTeamsFromTextareaToState() {
+      const txt = elTeams.value;
+      const teams = parseTeamsFromText(txt);
+      currentTeams = teams;
+      setStatus(`Loaded ${teams.length} lag. (Används vid nästa simulate)`);
+    }
+
+    function resetStats(teams) {
+      for (const t of teams) {
+        t.score = 0;
+        t.points = 0;
+        for (const p of t.players) {
+          p.goals = 0;
+          p.interceptions = 0;
+        }
+      }
+    }
+
+    // --------------------------
+    // Button handlers
+    // --------------------------
+    document.getElementById("btnLoad").addEventListener("click", () => {
+      try {
+        loadTeamsFromTextareaToState();
+      } catch (e) {
+        setStatus("Load misslyckades: " + e.message);
+      }
+    });
+
+    document.getElementById("btnPrint").addEventListener("click", () => {
+      clearOut();
+      try {
+        if (!currentTeams.length) loadTeamsFromTextareaToState();
+        // printTeams skriver ut utan att nollställa stats — men teams input saknar stats ändå.
+        WCSim.printTeams(currentTeams);
+        setStatus("Skrev ut lag till output.");
+      } catch (e) {
+        appendOut("ERROR: " + e.message);
+        setStatus("Print teams misslyckades.");
+      }
+    });
+
+    document.getElementById("btnSim").addEventListener("click", () => {
+      clearOut();
+      try {
+        if (!currentTeams.length) loadTeamsFromTextareaToState();
+        resetStats(currentTeams);
+        WCSim.simulateGroupPlay(currentTeams);
+        setStatus("Simulering klar.");
+      } catch (e) {
+        appendOut("ERROR: " + e.message);
+        setStatus("Simulate misslyckades.");
+      }
+    });
+
+    document.getElementById("btnClear").addEventListener("click", () => {
+      clearOut();
+      setStatus("Output rensad.");
+    });
+
+    // --------------------------
+    // Keyboard shortcuts
+    // --------------------------
+    window.addEventListener("keydown", (e) => {
+      const isMac = navigator.platform.toUpperCase().includes("MAC");
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+
+      if (mod && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        saveTeamsText();
+      }
+      if (mod && e.key.toLowerCase() === "l") {
+        e.preventDefault();
+        try {
+          loadTeamsFromTextareaToState();
+        } catch (err) {
+          setStatus("Load misslyckades: " + err.message);
+        }
+      }
+      if (mod && e.key === "Enter") {
+        e.preventDefault();
+        document.getElementById("btnSim").click();
+      }
+    });
+
+    // --------------------------
+    // Boot
+    // --------------------------
+    loadTeamsTextIntoTextarea();
+    try {
+      loadTeamsFromTextareaToState();
+    } catch {
+      // om default/raw är trasig vill vi inte krascha UI; user kan fixa
+      setStatus("Kunde inte parse:a teams direkt. Klicka Load teams efter fix.");
+    }
+  </script>
+</body>
+</html>
